@@ -120,11 +120,22 @@ void DisplayManager::showSplash() {
 // position in the carousel is always visible.
 void DisplayManager::drawChrome(Screen screen, const SystemStatus &status) {
     display.setTextSize(1);
+
+    // Any press inverts the header briefly. Without this a press on a
+    // screen that has no action is indistinguishable from a dead
+    // button.
+    if (status.pressFlash) {
+        display.fillRect(0, 0, SCREEN_WIDTH, 9, OLED_WHITE);
+        display.setTextColor(OLED_BLACK);
+    }
+
     display.setCursor(0, 0);
     display.print(SCREEN_TITLES[static_cast<uint8_t>(screen)]);
 
     const char *badge = status.simulating ? "SIM" : (status.linkUp ? "LIVE" : "----");
     printRightAligned(badge, SCREEN_WIDTH, 0, 1);
+
+    display.setTextColor(OLED_WHITE);
 
     display.drawFastHLine(0, 10, SCREEN_WIDTH, OLED_WHITE);
 

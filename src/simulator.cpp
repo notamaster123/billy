@@ -105,10 +105,16 @@ void Simulator::update(VehicleData &data) {
     data.set(Metric::STFT1, sinf(t * 1.7f) * 6.0f + jitter(1.2f));
     data.set(Metric::LTFT1, 3.9f + sinf(t * 0.13f) * 2.0f);
 
-    data.milOn = true;
-    data.storedCount = 2;
     data.dtcsRead = true;
-    data.dtcCount = 2;
-    strncpy(data.dtc[0], "P0171", sizeof(data.dtc[0]));
-    strncpy(data.dtc[1], "P0420", sizeof(data.dtc[1]));
+    if (codesPresent) {
+        data.milOn = true;
+        data.storedCount = 2;
+        data.dtcCount = 2;
+        strncpy(data.dtc[0], "P0171", sizeof(data.dtc[0]));
+        strncpy(data.dtc[1], "P0420", sizeof(data.dtc[1]));
+    } else {
+        data.milOn = false;
+        data.storedCount = 0;
+        data.dtcCount = 0;
+    }
 }

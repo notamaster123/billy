@@ -15,7 +15,13 @@ public:
     void begin();
     void update(VehicleData &data);
 
+    // Flips between "two stored codes" and "clean", so both the
+    // populated and empty CODES layouts can be reviewed at a desk.
+    void toggleCodes() { codesPresent = !codesPresent; }
+
 private:
+    bool codesPresent = true;
+
     enum class Phase { IDLE, ACCELERATE, CRUISE, DECELERATE };
 
     Phase phase = Phase::IDLE;

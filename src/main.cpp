@@ -18,6 +18,7 @@ static VehicleData simData;
 static uint8_t brightness = OLED_CONTRAST;
 static bool inverted = OLED_START_INVERTED;
 static SetupField editing = SetupField::NONE;
+static unsigned long lastPressAt = 0;
 
 // Formats the adapter MAC once; it never changes.
 static char macText[18];
@@ -52,7 +53,11 @@ static void handleRotation(int detents) {
 static void handleShortPress() {
     switch (currentScreen) {
         case Screen::CODES:
-            if (!simulating) {
+            if (simulating) {
+                // Toggle between "codes present" and "clean" so both
+                // renderings can be reviewed without a car.
+                simulator.toggleCodes();
+            } else {
                 obdManager.requestDtcs();
             }
             break;
@@ -120,12 +125,28 @@ void setup() {
 }
 
 void loop() {
-    handleRotation(encoder.consumeRotation());
+    int detents = encoder.consumeRotation();
+    if (detents != 0) {
+        Serial.printf("[enc] turn %+d\n", detents);
+    }
+    handleRotation(detents);
 
+    // Logged and flashed unconditionally: a press that lands on a
+    // screen with no action would otherwise be indistinguishable from
+    // broken hardware.
     switch (encoder.consumeButton()) {
-        case ButtonEvent::SHORT_PRESS: handleShortPress(); break;
-        case ButtonEvent::LONG_PRESS:  handleLongPress();  break;
-        case ButtonEvent::NONE:        break;
+        case ButtonEvent::SHORT_PRESS:
+            Serial.println("[enc] short press");
+            lastPressAt = millis();
+            handleShortPress();
+            break;
+        case ButtonEvent::LONG_PRESS:
+            Serial.println("[enc] long press");
+            lastPressAt = millis();
+            handleLongPress();
+            break;
+        case ButtonEvent::NONE:
+            break;
     }
 
     if (simulating) {
@@ -149,6 +170,7 @@ void loop() {
     status.brightness = brightness;
     status.inverted = inverted;
     status.editing = editing;
+    status.pressFlash = (millis() - lastPressAt) < 180;
 
     displayManager.render(currentScreen, simulating ? simData : obdManager.data(), status);
 }

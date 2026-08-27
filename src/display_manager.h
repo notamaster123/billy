@@ -35,6 +35,10 @@ struct SystemStatus {
     uint8_t brightness = 0xCF;
     bool inverted = false;
     SetupField editing = SetupField::NONE;
+
+    // Briefly true after any button press, so a press on a screen with
+    // no action still visibly registers.
+    bool pressFlash = false;
 };
 
 class DisplayManager {
