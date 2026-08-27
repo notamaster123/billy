@@ -220,6 +220,108 @@ static bool connectToMac(const uint8_t mac[6], const char *label) {
     return linkUp;
 }
 
+// Resolves a /command argument to a MAC: a scan index, an explicit
+// MAC, or (empty) the one in config.h.
+static bool resolveTarget(const String &arg, uint8_t out[6], String &label) {
+    if (arg.length() == 0) {
+        memcpy(out, OBD_MAC_ADDRESS, 6);
+        label = "config.h MAC";
+        return true;
+    }
+
+    if (arg.indexOf(':') >= 0) {
+        if (!parseMac(arg, out)) {
+            Serial.println("Could not parse that MAC (expected aa:bb:cc:dd:ee:ff)");
+            return false;
+        }
+        label = arg;
+        return true;
+    }
+
+    for (size_t i = 0; i < arg.length(); i++) {
+        if (!isdigit(static_cast<unsigned char>(arg[i]))) {
+            Serial.println("Expected a scan index or a MAC");
+            return false;
+        }
+    }
+
+    int idx = arg.toInt();
+    if (idx < 0 || idx >= scanCount) {
+        Serial.printf("No scan entry [%d]. Run /scan first (%d known).\n", idx, scanCount);
+        return false;
+    }
+    memcpy(out, scanTable[idx].mac, 6);
+    label = scanTable[idx].name;
+    return true;
+}
+
+// Works through the PINs these modules commonly ship with, clearing
+// any bond between attempts, and stops at the first success. Beats
+// hand-cycling: each attempt needs an unpair and a settle, and getting
+// that order wrong makes a correct PIN look wrong.
+static void doTryPins(const String &arg) {
+    if (linkUp) {
+        Serial.println("Already connected. /disconnect first.");
+        return;
+    }
+
+    uint8_t mac[6];
+    String label;
+    if (!resolveTarget(arg, mac, label)) {
+        return;
+    }
+
+    static const char *candidates[] = {"1234", "0000", "6789", "1111", "5678", "123456"};
+    const int candidateCount = sizeof(candidates) / sizeof(candidates[0]);
+
+    Serial.printf("Trying %d PINs against %s [%02X:%02X:%02X:%02X:%02X:%02X]\n", candidateCount,
+                  label.c_str(), mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+    for (int i = 0; i < candidateCount; i++) {
+        Serial.printf("\n--- [%d/%d] PIN \"%s\" ---\n", i + 1, candidateCount, candidates[i]);
+
+        doUnpair();
+        currentPin = candidates[i];
+        applyPin();
+        delay(300);
+
+        uint8_t addr[6];
+        memcpy(addr, mac, 6);
+        linkUp = SerialBT.connect(addr);
+
+        if (linkUp) {
+            Serial.printf("\n*** SPP link UP with PIN \"%s\" ***\n", candidates[i]);
+            Serial.println("Put this in include/config.h as OBD_PAIRING_PIN, then /init");
+            flushSerialInput();
+            return;
+        }
+
+        Serial.println("  failed");
+        SerialBT.disconnect();
+        delay(1000);
+    }
+
+    Serial.println("\nNone of the common PINs worked.");
+    Serial.println("Next: /ssp  (some modules want Secure Simple Pairing, not a PIN)");
+    flushSerialInput();
+}
+
+// Re-initializes the stack with Secure Simple Pairing enabled. Modules
+// that negotiate SSP reject legacy PIN pairing with the same auth
+// failure a wrong PIN produces, so the two are worth separating.
+// One-way until the next reset, as the core has no disableSSP().
+static void doEnableSsp() {
+    Serial.println("Restarting Bluetooth with SSP enabled...");
+    SerialBT.end();
+    delay(200);
+    SerialBT.enableSSP();
+    SerialBT.begin(OBD_LOCAL_BT_NAME, true);
+    delay(500);
+    Serial.println("SSP mode on (press EN to get back to PIN mode). Now /connect <index>");
+    Serial.println("Note: /scan results are cleared, so scan again first.");
+    scanCount = 0;
+}
+
 // arg is empty (use config.h), a scan index, a MAC, or a device name.
 static bool doConnect(const String &arg) {
     if (linkUp) {
@@ -444,6 +546,8 @@ static void printHelp() {
     Serial.println("  /connect <n>     connect to scan result n, e.g. /connect 1");
     Serial.println("  /connect <mac>   connect to an explicit aa:bb:cc:dd:ee:ff");
     Serial.println("  /pin <code>      set the pairing PIN, e.g. /pin 1234");
+    Serial.println("  /trypins <n>     try the common PINs against scan entry n");
+    Serial.println("  /ssp             retry using Secure Simple Pairing instead");
     Serial.println("  /unpair          forget all bonds (clears a failed pairing)");
     Serial.println("  /disconnect      close the SPP link");
     Serial.println("  /status          show link state");
@@ -505,6 +609,14 @@ static void handleLine(String line) {
         applyPin();
     } else if (line == "/unpair") {
         doUnpair();
+    } else if (line == "/trypins") {
+        doTryPins("");
+    } else if (line.startsWith("/trypins ")) {
+        String arg = line.substring(9);
+        arg.trim();
+        doTryPins(arg);
+    } else if (line == "/ssp") {
+        doEnableSsp();
     } else if (line == "/disconnect") {
         SerialBT.disconnect();
         linkUp = false;
