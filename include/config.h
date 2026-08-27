@@ -5,21 +5,35 @@
 // ============================================================
 // Bluetooth OBD-II adapter
 // ============================================================
+//
+// Target module: C210-591-307-AA with wireless hat 0210-591-313-AC
+// (Feasycom FSC-BT825). The FSC-BT825 is a Bluetooth 5.3 dual-mode
+// part with no WiFi radio, so the link is classic Bluetooth SPP --
+// see HARDWARE.md.
 
 // Name this ESP32 advertises as (only matters for pairing/debugging).
 #define OBD_LOCAL_BT_NAME "ESP32-OBD2"
 
-// Name of the ELM327 Bluetooth adapter to connect to. Most generic
-// clones broadcast "OBDII" or "OBDLink"; scan with a phone first and
-// update this if yours differs.
+// Name the OBD-II adapter broadcasts. Not yet confirmed for the
+// FSC-BT825 hat; generic dongles use "OBDII" or "OBDLink". Set
+// OBD_SCAN_ON_BOOT below to discover the real name.
 #define OBD_BT_DEVICE_NAME "OBDII"
 
-// Name-based discovery (SDP lookup) can be slow or flaky with some
-// ELM327 clones. If connecting by name fails, set this to 1 and fill
-// in OBD_MAC_ADDRESS with the adapter's Bluetooth MAC instead (find it
-// via a phone's Bluetooth settings or a BLE/BT scanner app).
+// Logs every nearby classic Bluetooth device (name, MAC, RSSI) to the
+// serial monitor at boot, then continues normally. Use this to find
+// the adapter's name/MAC, then set it back to 0.
+#define OBD_SCAN_ON_BOOT 0
+#define OBD_SCAN_DURATION_SEC 10
+
+// Name-based discovery (SDP lookup) can be slow or flaky. If
+// connecting by name fails, set this to 1 and fill in the MAC that
+// the boot scan reported.
 #define OBD_USE_MAC_ADDRESS 0
-static const uint8_t OBD_MAC_ADDRESS[6] = {0x00, 0x1D, 0xA5, 0x00, 0x00, 0x00};
+static uint8_t OBD_MAC_ADDRESS[6] = {0x00, 0x1D, 0xA5, 0x00, 0x00, 0x00};
+
+// Legacy pairing PIN, if the module demands one. Most ELM327-style
+// adapters use "1234" or "0000". Leave empty to skip setting a PIN.
+#define OBD_PAIRING_PIN ""
 
 // How long to wait for a response to an AT/PID command before giving up.
 #define ELM327_TIMEOUT_MS 2000

@@ -5,6 +5,31 @@
 
 void OBDManager::begin() {
     serialBT.begin(OBD_LOCAL_BT_NAME, true);
+
+    if (sizeof(OBD_PAIRING_PIN) > 1) {
+        serialBT.setPin(OBD_PAIRING_PIN, sizeof(OBD_PAIRING_PIN) - 1);
+    }
+}
+
+void OBDManager::scanAndLogDevices() {
+    Serial.println("Scanning for classic Bluetooth devices...");
+
+    BTScanResults *results = serialBT.discover(OBD_SCAN_DURATION_SEC * 1000);
+    if (results == nullptr) {
+        Serial.println("Scan failed to start");
+        return;
+    }
+
+    int count = results->getCount();
+    Serial.printf("Found %d device(s):\n", count);
+    for (int i = 0; i < count; i++) {
+        BTAdvertisedDevice *device = results->getDevice(i);
+        Serial.printf("  [%d] %-24s %s  RSSI %d\n", i,
+                      device->haveName() ? device->getName().c_str() : "(no name)",
+                      device->getAddress().toString().c_str(),
+                      device->getRSSI());
+    }
+    Serial.println("Set OBD_BT_DEVICE_NAME or OBD_MAC_ADDRESS in config.h");
 }
 
 void OBDManager::loop() {
@@ -30,7 +55,7 @@ void OBDManager::tryConnect() {
     Serial.println("Connecting to OBD-II adapter...");
 
 #if OBD_USE_MAC_ADDRESS
-    bool linked = serialBT.connect(const_cast<uint8_t *>(OBD_MAC_ADDRESS));
+    bool linked = serialBT.connect(OBD_MAC_ADDRESS);
 #else
     bool linked = serialBT.connect(OBD_BT_DEVICE_NAME);
 #endif

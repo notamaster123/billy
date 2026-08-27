@@ -17,6 +17,10 @@ void setup() {
     delay(1500);
 
     obdManager.begin();
+
+#if OBD_SCAN_ON_BOOT
+    obdManager.scanAndLogDevices();
+#endif
 }
 
 void loop() {

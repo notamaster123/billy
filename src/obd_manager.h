@@ -18,6 +18,11 @@ public:
     void begin();
     void loop();
 
+    // Logs nearby classic Bluetooth devices to Serial. Blocks for
+    // OBD_SCAN_DURATION_SEC; intended as a one-off setup aid to find
+    // the adapter's name/MAC.
+    void scanAndLogDevices();
+
     bool isConnected() const { return state == ObdState::CONNECTED; }
     const VehicleData &data() const { return vehicleData; }
 
