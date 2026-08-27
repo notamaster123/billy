@@ -5,15 +5,6 @@
 
 void OBDManager::begin() {
     serialBT.begin(OBD_LOCAL_BT_NAME, true);
-
-    if (sizeof(OBD_PAIRING_PIN) > 1) {
-        // setPin() gained a length argument in Arduino-ESP32 core 3.x.
-#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-        serialBT.setPin(OBD_PAIRING_PIN, sizeof(OBD_PAIRING_PIN) - 1);
-#else
-        serialBT.setPin(OBD_PAIRING_PIN);
-#endif
-    }
 }
 
 void OBDManager::scanAndLogDevices() {
@@ -59,11 +50,12 @@ void OBDManager::loop() {
 void OBDManager::tryConnect() {
     Serial.println("Connecting to OBD-II adapter...");
 
-#if OBD_USE_MAC_ADDRESS
-    bool linked = serialBT.connect(OBD_MAC_ADDRESS);
-#else
-    bool linked = serialBT.connect(OBD_BT_DEVICE_NAME);
-#endif
+    // ESP_SPP_SEC_NONE, confirmed by bring-up. connect()'s default of
+    // ESP_SPP_SEC_ENCRYPT|AUTHENTICATE demands authenticated pairing,
+    // which this adapter refuses -- reported as "authentication
+    // failed, status:9", indistinguishable from a wrong PIN. So no PIN
+    // is set anywhere: the adapter does not want one.
+    bool linked = serialBT.connect(OBD_MAC_ADDRESS, 0, ESP_SPP_SEC_NONE);
 
     if (!linked) {
         Serial.println("Bluetooth connect failed, will retry");

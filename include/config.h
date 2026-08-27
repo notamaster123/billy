@@ -31,10 +31,10 @@
 #define OBD_USE_MAC_ADDRESS 1
 static uint8_t OBD_MAC_ADDRESS[6] = {0xDC, 0x0D, 0x30, 0xA9, 0xC0, 0x5E};
 
-// Legacy pairing PIN. The module refused to pair without one
-// ("authentication failed, status:9"), and 1234 is the near-universal
-// default on ELM327-style adapters. Others seen: 0000, 6789, 1111.
-// Leave empty to skip setting a PIN.
+// Legacy pairing PIN. Unused by the gauge firmware: bring-up showed
+// this adapter wants no pairing at all and connects with
+// ESP_SPP_SEC_NONE. Kept only for the bring-up tool's /trypins, in
+// case a different adapter is swapped in later.
 #define OBD_PAIRING_PIN "1234"
 
 // How long to wait for a response to an AT/PID command before giving up.
