@@ -91,7 +91,7 @@ static void handleShortPress() {
 static void handleLongPress() {
     simulating = !simulating;
     if (simulating) {
-        obdManager.disconnect();
+        obdManager.shutdown();  // power the radio down, not just disconnect
         simulator.begin();
     } else {
         simData.clear();
@@ -110,8 +110,9 @@ void setup() {
     displayManager.showSplash();
 
     encoder.begin();
-    obdManager.begin();
     simulator.begin();
+    // The Bluetooth radio is started lazily by connect(), so
+    // simulation mode never powers it up.
 
     snprintf(macText, sizeof(macText), "%02X:%02X:%02X:%02X:%02X:%02X", OBD_MAC_ADDRESS[0],
              OBD_MAC_ADDRESS[1], OBD_MAC_ADDRESS[2], OBD_MAC_ADDRESS[3], OBD_MAC_ADDRESS[4],

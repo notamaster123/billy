@@ -15,7 +15,16 @@
 // non-blocking command loop below.
 class OBDManager {
 public:
+    // Starts the Bluetooth controller. Called lazily by connect(), so
+    // simulation mode never powers up the radio: the controller draws
+    // tens of milliamps and takes a large allocation even while idle,
+    // and its startup current spike is enough to brown out a weak
+    // bench supply.
     void begin();
+
+    // Releases the controller entirely, freeing that current and RAM.
+    void shutdown();
+
     void loop();
 
     void connect();     // starts a connection attempt
@@ -38,6 +47,7 @@ private:
     };
 
     BluetoothSerial serialBT;
+    bool radioStarted = false;
     State state = State::DISCONNECTED;
     VehicleData vehicleData;
 

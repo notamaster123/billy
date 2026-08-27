@@ -74,7 +74,23 @@ bool decodeDtc(uint8_t a, uint8_t b, char *out) {
 }  // namespace
 
 void OBDManager::begin() {
+    if (radioStarted) {
+        return;
+    }
     serialBT.begin(OBD_LOCAL_BT_NAME, true);
+    radioStarted = true;
+}
+
+void OBDManager::shutdown() {
+    if (!radioStarted) {
+        return;
+    }
+    serialBT.disconnect();
+    serialBT.end();
+    radioStarted = false;
+    state = State::DISCONNECTED;
+    waiting = false;
+    vehicleData.clear();
 }
 
 const char *OBDManager::statusText() const {
@@ -92,6 +108,7 @@ void OBDManager::connect() {
     if (state != State::DISCONNECTED) {
         return;
     }
+    begin();  // no-op if the radio is already up
     state = State::CONNECTING;
     lastAttemptAt = millis();
 }
