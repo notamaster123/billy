@@ -37,8 +37,11 @@ static uint8_t OBD_MAC_ADDRESS[6] = {0xDC, 0x0D, 0x30, 0xA9, 0xC0, 0x5E};
 // case a different adapter is swapped in later.
 #define OBD_PAIRING_PIN "1234"
 
-// How long to wait for a response to an AT/PID command before giving up.
-#define ELM327_TIMEOUT_MS 2000
+// How long to wait for a response before giving up. The car is on
+// ISO 9141-2 (confirmed -- see HARDWARE.md), which is far slower than
+// CAN, and the first query after connecting triggers a slow bus init
+// that can take several seconds.
+#define ELM327_TIMEOUT_MS 5000
 
 // ============================================================
 // OLED display (Inland 1.3" - SH1106 driver, 128x64, I2C)

@@ -410,18 +410,37 @@ static bool doConnect(const String &arg) {
 #endif
 }
 
-// Reads until the ELM327 '>' prompt or timeout. Returns everything
-// received, prompt included, so nothing is silently dropped.
-static String readReply(uint32_t timeoutMs) {
+// Reads until the ELM327 '>' prompt. The timeout applies to the FIRST
+// byte only; once bytes are arriving, a short idle gap ends the read.
+//
+// A single total timeout does not work here: an ISO 9141-2 slow init
+// can take many seconds to produce anything, but then streams the
+// whole frame at once. Cutting the read off mid-wait is what made the
+// 0100 reply show up later as "unsolicited" -- the answer was correct,
+// we just stopped listening too early.
+static String readReply(uint32_t firstByteTimeoutMs) {
+    const uint32_t idleGapMs = 1000;
     String buf;
     uint32_t start = millis();
-    while (millis() - start < timeoutMs) {
+    uint32_t lastByte = 0;
+    bool gotAny = false;
+
+    while (true) {
         while (SerialBT.available()) {
             char c = static_cast<char>(SerialBT.read());
             buf += c;
+            gotAny = true;
+            lastByte = millis();
             if (c == '>') {
                 return buf;
             }
+        }
+
+        if (!gotAny && millis() - start > firstByteTimeoutMs) {
+            break;
+        }
+        if (gotAny && millis() - lastByte > idleGapMs) {
+            break;  // stream stopped without a prompt
         }
         delay(1);
     }
@@ -540,7 +559,11 @@ static void doInit() {
     sendCommand("ATRV");         // battery voltage (adapter-side, no ECU needed)
     Serial.println("--- vehicle ---");
     sendCommand("ATDP", 5000);   // describe detected protocol
-    String supported = sendCommand("0100", 5000);
+    sendCommand("ATDPN", 5000);  // protocol number; some clones stub out ATDP
+
+    // The first PID query triggers the bus init. On ISO 9141-2 that is
+    // a slow init and can take well over five seconds to answer.
+    String supported = sendCommand("0100", 20000);
     decodeSupportedPids(supported);
     Serial.println("--- done ---");
 }
