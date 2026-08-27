@@ -182,9 +182,10 @@ const GAUGES = [
 
 let port = null, writer = null, reader = null;
 let rxBuffer = "";
-let awaiting = null;      // { resolve, timer } for the in-flight command
+let awaiting = null;      // { match, resolve, timer } for the in-flight command
 let polling = false;
 let btLinked = false;
+let busy = false;         // a blocking firmware command is running
 
 const $ = (id) => document.getElementById(id);
 
@@ -254,17 +255,55 @@ async function send(text) {
   await writer.write(text + "\r\n");
 }
 
-// Sends a command and resolves with the adapter's reply line. The
-// firmware prefixes replies with "<<", so that is the completion
-// marker. Resolves null on timeout rather than hanging the UI.
-function sendAndWait(text, timeoutMs = 8000) {
+// Every command goes through one queue. The adapter handles exactly
+// one request at a time, and the firmware blocks while running /init,
+// so anything sent concurrently just queues in the UART buffer and
+// comes back attributed to the wrong command -- which desyncs every
+// reply from then on.
+let queue = Promise.resolve();
+
+function enqueue(task) {
+  const run = () => task();
+  queue = queue.then(run, run);
+  return queue;
+}
+
+// Waits for a line matching `match`. Resolves null on timeout rather
+// than hanging the UI.
+function waitForLine(match, timeoutMs) {
   return new Promise((resolve) => {
-    if (awaiting) { resolve(null); return; }
     awaiting = {
+      match,
       resolve,
       timer: setTimeout(() => { awaiting = null; resolve(null); }, timeoutMs),
     };
-    send(text);
+  });
+}
+
+// Sends one command and resolves with the adapter's reply line.
+// Serialized: never overlaps another command.
+function sendAndWait(text, timeoutMs = 8000) {
+  return enqueue(async () => {
+    const done = waitForLine((l) => l.startsWith("<<"), timeoutMs);
+    await send(text);
+    const reply = await done;
+    // Let the adapter settle. Without this the ESP32's SPP buffer
+    // backs up and logs "SPP Write Congested".
+    await new Promise((r) => setTimeout(r, 120));
+    return reply;
+  });
+}
+
+// /init blocks the firmware for a long time on ISO 9141-2. Hold the
+// queue until it prints its completion marker so nothing interleaves.
+function runInit() {
+  return enqueue(async () => {
+    setBusy(true);
+    const done = waitForLine((l) => l.includes("--- done ---"), 90000);
+    await send("/init");
+    const finished = await done;
+    if (!finished) log("Probe did not finish within 90 s", "err");
+    setBusy(false);
   });
 }
 
@@ -287,18 +326,14 @@ function handleLine(line) {
   if (/SPP link FAILED/.test(line)) setBt(false);
   if (/link dropped/i.test(line)) setBt(false);
 
-  if (line.startsWith("<<")) {
-    log(line, "rx");
-    if (awaiting) {
-      clearTimeout(awaiting.timer);
-      const done = awaiting.resolve;
-      awaiting = null;
-      done(line);
-    }
-    return;
-  }
+  log(line, line.startsWith("<<") ? "rx" : line.startsWith(">>") ? "tx" : "sys");
 
-  log(line, line.startsWith(">>") ? "tx" : "sys");
+  if (awaiting && awaiting.match(line)) {
+    clearTimeout(awaiting.timer);
+    const done = awaiting.resolve;
+    awaiting = null;
+    done(line);
+  }
 }
 
 // The firmware prints replies with control characters spelled out so
@@ -346,9 +381,19 @@ function setBt(on) {
   btLinked = on;
   $("dotBt").className = "dot" + (on ? " on" : "");
   $("txtBt").textContent = on ? "Adapter linked" : "Adapter not linked";
-  $("btnInit").disabled = !on;
-  $("btnPoll").disabled = !on;
+  $("btnInit").disabled = !on || busy;
+  $("btnPoll").disabled = !on || busy;
   if (!on) stopPolling();
+}
+
+// While the firmware is inside a blocking command, anything else sent
+// only queues up in the UART buffer and desyncs the replies.
+function setBusy(on) {
+  busy = on;
+  $("btnInit").disabled = on || !btLinked;
+  $("btnPoll").disabled = on || !btLinked;
+  $("btnScan").disabled = on || !port;
+  $("btnInit").textContent = on ? "Probing…" : "Probe (init)";
 }
 
 const seenDevices = new Map();
@@ -367,10 +412,14 @@ function addDevice(name, mac, rssi) {
     '<span><span class="nm"></span><br><span class="mac"></span></span>';
   btn.querySelector(".nm").textContent = name;
   btn.querySelector(".mac").textContent = mac + "  ·  " + rssi + " dBm";
-  btn.onclick = async () => {
+  btn.onclick = () => enqueue(async () => {
+    if (rssi <= -85) {
+      log("Warning: " + rssi + " dBm is very weak. The link may open but " +
+          "queries will time out. Move the ESP32 closer to the adapter.", "err");
+    }
     log("Linking to " + name + " (" + mac + ")", "sys");
     await send("/connect " + mac);
-  };
+  });
   $("devices").appendChild(btn);
 }
 
@@ -400,6 +449,14 @@ function updateGauge(g, value) {
   g.el.querySelector(".track > div").style.width = pct + "%";
 }
 
+// Shows why a gauge has no number, rather than leaving a stale one.
+function markGauge(g, why) {
+  const val = g.el.querySelector(".val");
+  val.firstChild.nodeValue = why;
+  val.classList.add("stale");
+  g.el.querySelector(".track > div").style.width = "0%";
+}
+
 // ---------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------
@@ -424,12 +481,28 @@ async function pollLoop() {
   while (polling) {
     for (const g of GAUGES) {
       if (!polling) break;
+
       const reply = await sendAndWait("01" + g.pid, 6000);
-      if (!reply) continue;
+      if (!polling) break;
+
+      if (!reply) {
+        markGauge(g, "timeout");
+        continue;
+      }
+      // The ECU answers NO DATA for PIDs it will not report right now
+      // -- RPM with the engine off, most commonly.
+      if (/NO DATA/i.test(reply)) {
+        markGauge(g, "n/a");
+        continue;
+      }
+
       const bytes = extractPid(cleanHex(reply), g.pid, g.bytes);
-      if (bytes) updateGauge(g, g.decode.apply(null, bytes));
+      if (bytes) {
+        updateGauge(g, g.decode.apply(null, bytes));
+      } else {
+        markGauge(g, "?");
+      }
     }
-    await new Promise((r) => setTimeout(r, 60));
   }
 }
 
@@ -459,7 +532,7 @@ if (!("serial" in navigator)) {
 
 $("btnUsb").onclick = connectUsb;
 $("btnScan").onclick = doScan;
-$("btnInit").onclick = () => send("/init");
+$("btnInit").onclick = () => { stopPolling(); runInit(); };
 $("btnPoll").onclick = () => (polling ? stopPolling() : startPolling());
 $("btnSend").onclick = sendFromBox;
 $("cmd").addEventListener("keydown", (e) => { if (e.key === "Enter") sendFromBox(); });
