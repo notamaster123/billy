@@ -197,27 +197,60 @@ static void printConnectResult() {
         Serial.println("SPP link UP");
         return;
     }
-    Serial.println("SPP link FAILED");
-    Serial.println("  If the log above says \"authentication failed\", the module");
-    Serial.println("  wants a pairing PIN. Try, in order:");
-    Serial.printf("    /pin 1234   (current: \"%s\")\n", currentPin.c_str());
-    Serial.println("    /unpair     clear a cached half-formed bond");
-    Serial.println("    /connect <index>");
-    Serial.println("  Other PINs seen on these modules: 0000, 6789, 1111");
+    Serial.println("SPP link FAILED on every security mode.");
+    Serial.println("  Next things to rule out:");
+    Serial.println("    /unpair     clear a cached half-formed bond, then retry");
+    Serial.println("    - is another device (phone, Mac) holding the module?");
+    Serial.println("      it accepts exactly one connection at a time");
+    Serial.printf("    /trypins 0  if it really does want a PIN (current: \"%s\")\n",
+                  currentPin.c_str());
 }
 
 // Connects by MAC. Preferred over name: it skips the SDP name lookup,
 // which is the flaky part with most ELM327 clones.
+//
+// connect() defaults to demanding ESP_SPP_SEC_ENCRYPT|AUTHENTICATE.
+// Plenty of these adapters publish SPP with no security and refuse
+// that demand -- which surfaces as "authentication failed", the same
+// error a wrong PIN gives. So work down from secure to open, and
+// report which combination actually took.
 static bool connectToMac(const uint8_t mac[6], const char *label) {
-    Serial.printf("Connecting to %s [%02X:%02X:%02X:%02X:%02X:%02X] ...\n", label,
-                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    struct Attempt {
+        const char *description;
+        int channel;
+        esp_spp_sec_t sec;
+    };
+    static const Attempt attempts[] = {
+        {"no security, auto channel", 0, ESP_SPP_SEC_NONE},
+        {"no security, channel 1", 1, ESP_SPP_SEC_NONE},
+        {"authenticated + encrypted, auto channel", 0,
+         static_cast<esp_spp_sec_t>(ESP_SPP_SEC_ENCRYPT | ESP_SPP_SEC_AUTHENTICATE)},
+    };
+    const int attemptCount = sizeof(attempts) / sizeof(attempts[0]);
 
-    uint8_t addr[6];
-    memcpy(addr, mac, 6);  // connect() takes a non-const pointer
-    linkUp = SerialBT.connect(addr);
+    Serial.printf("Connecting to %s [%02X:%02X:%02X:%02X:%02X:%02X]\n", label, mac[0], mac[1],
+                  mac[2], mac[3], mac[4], mac[5]);
+
+    for (int i = 0; i < attemptCount; i++) {
+        Serial.printf("  [%d/%d] %s ... ", i + 1, attemptCount, attempts[i].description);
+
+        uint8_t addr[6];
+        memcpy(addr, mac, 6);  // connect() takes a non-const pointer
+        linkUp = SerialBT.connect(addr, attempts[i].channel, attempts[i].sec);
+
+        if (linkUp) {
+            Serial.println("OK");
+            Serial.printf("SPP link UP (%s)\n", attempts[i].description);
+            return true;
+        }
+        Serial.println("failed");
+
+        SerialBT.disconnect();
+        delay(800);
+    }
 
     printConnectResult();
-    return linkUp;
+    return false;
 }
 
 // Resolves a /command argument to a MAC: a scan index, an explicit
