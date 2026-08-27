@@ -43,8 +43,13 @@ struct SystemStatus {
 
 class DisplayManager {
 public:
-    // Returns false if the panel did not ACK at OLED_I2C_ADDRESS.
+    // Returns false if the panel failed to initialise. Every other
+    // method is a no-op after that: the driver allocates its
+    // framebuffer inside begin(), so drawing anyway dereferences a
+    // null pointer and panics -- which looks like a power fault
+    // because the board just reboots in a loop.
     bool begin();
+    bool isReady() const { return ready; }
 
     void showSplash();
     void render(Screen screen, const VehicleData &data, const SystemStatus &status);
@@ -55,6 +60,8 @@ public:
     void setInverted(bool inverted);
 
 private:
+    bool ready = false;
+
     void drawChrome(Screen screen, const SystemStatus &status);
     void drawDash(const VehicleData &data);
     void drawTemps(const VehicleData &data);

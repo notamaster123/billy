@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <esp_system.h>
 
 #include "config.h"
 #include "display_manager.h"
@@ -19,6 +20,10 @@ static uint8_t brightness = OLED_CONTRAST;
 static bool inverted = OLED_START_INVERTED;
 static SetupField editing = SetupField::NONE;
 static unsigned long lastPressAt = 0;
+
+// Survives a reset (but not a power cycle), so a climbing count in the
+// serial log is proof of a boot loop rather than a one-off failure.
+RTC_DATA_ATTR static uint32_t bootCount = 0;
 
 // Formats the adapter MAC once; it never changes.
 static char macText[18];
@@ -101,9 +106,21 @@ static void handleLongPress() {
 
 void setup() {
     Serial.begin(115200);
+    delay(300);  // let the port settle so the first lines are not lost
 
-    if (!displayManager.begin()) {
-        Serial.println("OLED not found - check wiring and I2C address");
+    // Printed every boot: if this banner repeats in the monitor, the
+    // board is resetting in a loop, which is the same symptom a
+    // display fault produces.
+    Serial.println();
+    Serial.println("=== ESP32 OBD-II gauges ===");
+    Serial.printf("boot #%lu  reset reason: %d\n", ++bootCount, esp_reset_reason());
+    Serial.printf("free heap: %u bytes\n", ESP.getFreeHeap());
+
+    if (displayManager.begin()) {
+        Serial.println("OLED: ok");
+    } else {
+        Serial.println("OLED: FAILED to initialise - check CLK/MOSI/RES/DC/CS and 3V3");
+        Serial.println("      (continuing headless; serial still works)");
     }
     displayManager.setContrast(brightness);
     displayManager.setInverted(inverted);

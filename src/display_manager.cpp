@@ -72,14 +72,32 @@ void formatMetric(const VehicleData &data, Metric m, char *out, size_t len) {
 }  // namespace
 
 bool DisplayManager::begin() {
-#if !DISPLAY_USE_SPI
+#if DISPLAY_USE_SPI
+    Serial.printf("OLED: SPI mode (%s), DC=%d RES=%d CS=%d\n",
+                  DISPLAY_SPI_HARDWARE ? "hardware VSPI, CLK=18 MOSI=23" : "software",
+                  OLED_DC_PIN, OLED_RES_PIN, OLED_CS_PIN);
+#else
+    Serial.printf("OLED: I2C mode, SDA=%d SCL=%d addr=0x%02X\n", OLED_SDA_PIN, OLED_SCL_PIN,
+                  OLED_I2C_ADDRESS);
     Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
 #endif
+
+    // The framebuffer is the only large allocation begin() makes. If
+    // there is room for it, a failure is the bus or the init command
+    // list, not memory -- which are very different faults.
+    Serial.printf("OLED: free heap %u, need 1024 for the framebuffer\n", ESP.getFreeHeap());
 
 #if DISPLAY_IS_SH1106
     // On SPI the address argument is ignored by the driver.
     if (!display.begin(DISPLAY_USE_SPI ? 0 : OLED_I2C_ADDRESS, true)) {
-        return false;
+        // Retry without the reset pulse. If this succeeds, RES is
+        // miswired or the panel is not holding reset correctly.
+        Serial.println("OLED: first begin() failed, retrying without reset pulse");
+        delay(50);
+        if (!display.begin(DISPLAY_USE_SPI ? 0 : OLED_I2C_ADDRESS, false)) {
+            return false;
+        }
+        Serial.println("OLED: succeeded with reset disabled - check the RES wire");
     }
 #else
 #if DISPLAY_USE_SPI
@@ -96,10 +114,14 @@ bool DisplayManager::begin() {
     display.setTextWrap(false);
     display.clearDisplay();
     display.display();
+    ready = true;
     return true;
 }
 
 void DisplayManager::showSplash() {
+    if (!ready) {
+        return;
+    }
     display.clearDisplay();
     display.setTextColor(OLED_WHITE);
 
@@ -284,6 +306,9 @@ void DisplayManager::drawStatus(const SystemStatus &status) {
 }
 
 void DisplayManager::setContrast(uint8_t level) {
+    if (!ready) {
+        return;
+    }
 #if DISPLAY_IS_SH1106
     display.setContrast(level);
 #else
@@ -295,6 +320,9 @@ void DisplayManager::setContrast(uint8_t level) {
 }
 
 void DisplayManager::setInverted(bool inverted) {
+    if (!ready) {
+        return;
+    }
     display.invertDisplay(inverted);
 }
 
@@ -335,6 +363,9 @@ void DisplayManager::drawSetup(const SystemStatus &status) {
 }
 
 void DisplayManager::render(Screen screen, const VehicleData &data, const SystemStatus &status) {
+    if (!ready) {
+        return;
+    }
     display.clearDisplay();
     display.setTextColor(OLED_WHITE);
 
