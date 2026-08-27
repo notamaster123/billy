@@ -81,6 +81,15 @@ static void doUnpair() {
     free(list);
 }
 
+// Scanning and connecting block for seconds at a time. Anything typed
+// meanwhile queues in the UART buffer and merges into the next command,
+// so drop it rather than executing a corrupted line.
+static void flushSerialInput() {
+    while (Serial.available()) {
+        Serial.read();
+    }
+}
+
 // Parses "dc:0d:30:a9:c0:5e" into 6 bytes.
 static bool parseMac(const String &s, uint8_t out[6]) {
     unsigned int v[6];
@@ -133,9 +142,11 @@ static void printHex(const String &s) {
 // ------------------------------------------------------------
 
 static void doScan() {
-    Serial.printf("Scanning %d s for classic Bluetooth devices...\n", OBD_SCAN_DURATION_SEC);
+    Serial.printf("Scanning %d s for classic Bluetooth devices (don't type)...\n",
+                  OBD_SCAN_DURATION_SEC);
 
     BTScanResults *results = SerialBT.discover(OBD_SCAN_DURATION_SEC * 1000);
+    flushSerialInput();
     if (results == nullptr) {
         Serial.println("  scan failed to start");
         return;
@@ -144,24 +155,41 @@ static void doScan() {
     int count = results->getCount();
     Serial.printf("Found %d device(s):\n", count);
     scanCount = 0;
+    int bestRssi = -127;
     for (int i = 0; i < count; i++) {
         BTAdvertisedDevice *d = results->getDevice(i);
         String addr = d->getAddress().toString().c_str();
         String name = d->haveName() ? String(d->getName().c_str()) : String("(no name)");
+        int rssi = d->getRSSI();
+        if (rssi > bestRssi) {
+            bestRssi = rssi;
+        }
 
-        Serial.printf("  [%d] %-24s %s  RSSI %d\n", i, name.c_str(), addr.c_str(), d->getRSSI());
+        // An inquiry reply can get through at a signal level far too
+        // weak for the multi-round pairing handshake, so flag it.
+        const char *quality = rssi > -70 ? "good" : (rssi > -85 ? "weak" : "TOO WEAK");
+        Serial.printf("  [%d] %-24s %s  RSSI %d (%s)\n", i, name.c_str(), addr.c_str(), rssi,
+                      quality);
 
         if (scanCount < MAX_SCAN_ENTRIES && parseMac(addr, scanTable[scanCount].mac)) {
             scanTable[scanCount].name = name;
             scanCount++;
         }
     }
+
     if (count == 0) {
         Serial.println("  Nothing found. Is the module powered (ignition on)");
         Serial.println("  and not already paired to a phone?");
-    } else {
-        Serial.println("  Connect with /connect <index>, e.g. /connect 1");
+        return;
     }
+
+    if (bestRssi <= -85) {
+        Serial.println();
+        Serial.println("  !! Everything here is very weak. Pairing needs a better link");
+        Serial.println("  !! than discovery does, so move the ESP32 next to the module");
+        Serial.println("  !! and scan again before trying to connect.");
+    }
+    Serial.println("  Connect with /connect <index>, e.g. /connect 1");
 }
 
 static void printConnectResult() {
@@ -202,6 +230,7 @@ static bool doConnect(const String &arg) {
     // A scan leaves the controller busy for a moment; connecting
     // immediately afterwards tends to fail spuriously.
     delay(500);
+    flushSerialInput();
 
     if (arg.length() > 0) {
         if (arg.indexOf(':') >= 0) {
@@ -434,10 +463,24 @@ static void printHelp() {
 }
 
 static void handleLine(String line) {
-    line.trim();
+    // Strip control characters before trimming: a stray byte inside an
+    // argument silently changes how it is interpreted.
+    String clean;
+    for (size_t i = 0; i < line.length(); i++) {
+        if (static_cast<unsigned char>(line[i]) >= 0x20) {
+            clean += line[i];
+        }
+    }
+    clean.trim();
+    line = clean;
+
     if (line.length() == 0) {
         return;
     }
+
+    // Echo what was actually parsed, so a garbled line is visible
+    // rather than quietly doing the wrong thing.
+    Serial.printf("[cmd] \"%s\"\n", line.c_str());
 
     if (!line.startsWith("/")) {
         sendCommand(line);
@@ -454,6 +497,8 @@ static void handleLine(String line) {
         String arg = line.substring(9);
         arg.trim();
         doConnect(arg);
+    } else if (line == "/pin") {
+        Serial.printf("Current pairing PIN: \"%s\" (set with /pin 1234)\n", currentPin.c_str());
     } else if (line.startsWith("/pin ")) {
         currentPin = line.substring(5);
         currentPin.trim();
