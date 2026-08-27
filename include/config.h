@@ -31,9 +31,11 @@
 #define OBD_USE_MAC_ADDRESS 1
 static uint8_t OBD_MAC_ADDRESS[6] = {0xDC, 0x0D, 0x30, 0xA9, 0xC0, 0x5E};
 
-// Legacy pairing PIN, if the module demands one. Most ELM327-style
-// adapters use "1234" or "0000". Leave empty to skip setting a PIN.
-#define OBD_PAIRING_PIN ""
+// Legacy pairing PIN. The module refused to pair without one
+// ("authentication failed, status:9"), and 1234 is the near-universal
+// default on ELM327-style adapters. Others seen: 0000, 6789, 1111.
+// Leave empty to skip setting a PIN.
+#define OBD_PAIRING_PIN "1234"
 
 // How long to wait for a response to an AT/PID command before giving up.
 #define ELM327_TIMEOUT_MS 2000

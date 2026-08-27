@@ -14,6 +14,7 @@
 
 #include <Arduino.h>
 #include <BluetoothSerial.h>
+#include <esp_gap_bt_api.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -31,6 +32,54 @@ struct ScanEntry {
 static const int MAX_SCAN_ENTRIES = 20;
 static ScanEntry scanTable[MAX_SCAN_ENTRIES];
 static int scanCount = 0;
+
+// Legacy pairing PIN, changeable at runtime so a wrong guess costs a
+// retry rather than a rebuild.
+static String currentPin = OBD_PAIRING_PIN;
+
+// Must be called after SerialBT.begin() -- the GAP call underneath
+// needs an initialized Bluetooth stack.
+static void applyPin() {
+    if (currentPin.length() == 0) {
+        Serial.println("No pairing PIN set (use /pin 1234)");
+        return;
+    }
+    // setPin() gained a length argument in Arduino-ESP32 core 3.x.
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+    SerialBT.setPin(currentPin.c_str(), currentPin.length());
+#else
+    SerialBT.setPin(currentPin.c_str());
+#endif
+    Serial.printf("Pairing PIN set to \"%s\"\n", currentPin.c_str());
+}
+
+// A failed pairing attempt can leave a half-formed bond cached, which
+// makes every later attempt fail the same way. Clearing it forces a
+// fresh pairing handshake.
+static void doUnpair() {
+    int num = esp_bt_gap_get_bond_device_num();
+    if (num <= 0) {
+        Serial.println("No bonded devices to remove");
+        return;
+    }
+
+    esp_bd_addr_t *list = static_cast<esp_bd_addr_t *>(malloc(sizeof(esp_bd_addr_t) * num));
+    if (list == nullptr) {
+        Serial.println("Out of memory listing bonds");
+        return;
+    }
+
+    if (esp_bt_gap_get_bond_device_list(&num, list) == ESP_OK) {
+        for (int i = 0; i < num; i++) {
+            Serial.printf("Removing bond %02X:%02X:%02X:%02X:%02X:%02X ... %s\n",
+                          list[i][0], list[i][1], list[i][2], list[i][3], list[i][4], list[i][5],
+                          esp_bt_gap_remove_bond_device(list[i]) == ESP_OK ? "ok" : "failed");
+        }
+    } else {
+        Serial.println("Could not read the bond list");
+    }
+    free(list);
+}
 
 // Parses "dc:0d:30:a9:c0:5e" into 6 bytes.
 static bool parseMac(const String &s, uint8_t out[6]) {
@@ -121,9 +170,12 @@ static void printConnectResult() {
         return;
     }
     Serial.println("SPP link FAILED");
-    Serial.println("  - try the other scan entry: /connect <index>");
-    Serial.println("  - name lookup is flaky; connecting by index/MAC is more reliable");
-    Serial.println("  - the module may need pairing first (OBD_PAIRING_PIN)");
+    Serial.println("  If the log above says \"authentication failed\", the module");
+    Serial.println("  wants a pairing PIN. Try, in order:");
+    Serial.printf("    /pin 1234   (current: \"%s\")\n", currentPin.c_str());
+    Serial.println("    /unpair     clear a cached half-formed bond");
+    Serial.println("    /connect <index>");
+    Serial.println("  Other PINs seen on these modules: 0000, 6789, 1111");
 }
 
 // Connects by MAC. Preferred over name: it skips the SDP name lookup,
@@ -362,6 +414,8 @@ static void printHelp() {
     Serial.println("  /connect         open the SPP link (target from config.h)");
     Serial.println("  /connect <n>     connect to scan result n, e.g. /connect 1");
     Serial.println("  /connect <mac>   connect to an explicit aa:bb:cc:dd:ee:ff");
+    Serial.println("  /pin <code>      set the pairing PIN, e.g. /pin 1234");
+    Serial.println("  /unpair          forget all bonds (clears a failed pairing)");
     Serial.println("  /disconnect      close the SPP link");
     Serial.println("  /status          show link state");
     Serial.println("  /init            run the standard ELM327 init + probe");
@@ -400,6 +454,12 @@ static void handleLine(String line) {
         String arg = line.substring(9);
         arg.trim();
         doConnect(arg);
+    } else if (line.startsWith("/pin ")) {
+        currentPin = line.substring(5);
+        currentPin.trim();
+        applyPin();
+    } else if (line == "/unpair") {
+        doUnpair();
     } else if (line == "/disconnect") {
         SerialBT.disconnect();
         linkUp = false;
@@ -434,15 +494,7 @@ void setup() {
     );
 
     SerialBT.begin(OBD_LOCAL_BT_NAME, true);
-    if (sizeof(OBD_PAIRING_PIN) > 1) {
-        // setPin() gained a length argument in Arduino-ESP32 core 3.x.
-#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-        SerialBT.setPin(OBD_PAIRING_PIN, sizeof(OBD_PAIRING_PIN) - 1);
-#else
-        SerialBT.setPin(OBD_PAIRING_PIN);
-#endif
-        Serial.println("Pairing PIN set");
-    }
+    applyPin();
 
     printHelp();
     Serial.println("Tip: run /scan first, then /connect, then /init");
