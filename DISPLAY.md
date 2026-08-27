@@ -23,6 +23,17 @@ This panel has 7 pins, which makes it the SPI variant (a 4-pin
 | DC   | GPIO17 | configurable |
 | CS   | GPIO5  | configurable |
 
+> **If the panel lights up with VCC and GND disconnected, its power
+> wiring is broken.** It is running on leakage through the ESD clamp
+> diodes on its data pins, with the return path through whichever
+> signal line is currently low. That is out of spec for those diodes,
+> makes the ESP32's GPIOs source current they were not designed to,
+> and leaves the panel on a sagging rail about a diode drop below
+> 3.3 V — so it looks dim, wanders with the data pattern, and works
+> intermittently. Check continuity from the OLED's GND pin to an ESP32
+> GND pin, and for ~3.3 V on its VCC pin. A jumper in the wrong
+> breadboard row or an unsoldered header pin is the usual cause.
+
 CLK and MOSI are fixed because hardware SPI uses the ESP32's VSPI
 peripheral and the Adafruit driver calls `SPI.begin()` itself, which
 would undo any pin remapping. To put them elsewhere, set
