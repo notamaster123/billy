@@ -81,7 +81,20 @@
   .gauge .val.stale { color: var(--muted); }
   .gauge .unit { font-size: 14px; color: var(--muted); font-weight: 400; margin-left: 4px; }
   .track { height: 4px; background: var(--line); border-radius: 2px; margin-top: 9px; overflow: hidden; }
-  .track > div { height: 100%; background: var(--accent); width: 0; transition: width .18s ease; }
+  .track > div { height: 100%; background: var(--accent); width: 0; transition: width .18s ease, margin-left .18s ease; }
+  /* Centre tick, so a zero fuel trim is visibly "no correction". */
+  .track.bipolar { position: relative; }
+  .track.bipolar::after {
+    content: ""; position: absolute; left: 50%; top: -2px;
+    width: 1px; height: 8px; background: var(--muted); opacity: .6;
+  }
+  .dtc { display: flex; align-items: baseline; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .dtc:last-child { border-bottom: 0; }
+  .dtc code { font-family: var(--mono); font-size: 17px; font-weight: 650; color: var(--warn); }
+  .dtc span { color: var(--muted); font-size: 13px; }
+  .mil { display: inline-flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 8px; margin-bottom: 12px; }
+  .mil.on  { background: #3a2a12; border: 1px solid var(--warn); color: #ffce7a; }
+  .mil.off { background: #14291f; border: 1px solid var(--good); color: #8ee6bd; }
   #log {
     font-family: var(--mono); font-size: 12px; line-height: 1.55;
     height: 320px; overflow-y: auto; padding: 12px 16px;
@@ -152,6 +165,18 @@
     </section>
 
     <section class="panel">
+      <h2>Trouble codes</h2>
+      <div class="body">
+        <div id="milStatus"></div>
+        <div id="dtcList">
+          <p class="hint">Hit <b>Read codes</b> to query stored (mode 03) and
+          pending (mode 07) diagnostic trouble codes.</p>
+        </div>
+        <button id="btnDtc" disabled style="margin-top:12px">Read codes</button>
+      </div>
+    </section>
+
+    <section class="panel">
       <h2>Log</h2>
       <div id="log"></div>
     </section>
@@ -165,19 +190,36 @@
 // Gauges. `pid` is the mode-01 PID; `decode` turns the data bytes
 // (already hex, header stripped) into a display value.
 // ---------------------------------------------------------------
+// `every` throttles slow-moving values: with ten PIDs on a bus this
+// slow, polling everything each pass would make RPM lag badly. Coolant
+// does not need re-reading four times a second.
+//
+// `bipolar` centres the bar on zero -- fuel trims are signed.
 const GAUGES = [
-  { pid: "0C", label: "Engine RPM",  unit: "rpm",  max: 7000, bytes: 2,
+  { pid: "0C", label: "Engine RPM",  unit: "rpm",  max: 7000, bytes: 2, every: 1,
     decode: (a, b) => (a * 256 + b) / 4 },
-  { pid: "0D", label: "Speed",       unit: "km/h", max: 200,  bytes: 1,
-    decode: (a) => a },
-  { pid: "05", label: "Coolant",     unit: "°C", max: 130, bytes: 1,
-    decode: (a) => a - 40 },
-  { pid: "11", label: "Throttle",    unit: "%",    max: 100,  bytes: 1,
+  { pid: "0D", label: "Speed",       unit: "mph",  max: 120,  bytes: 1, every: 1,
+    decode: (a) => a * 0.621371 },
+  { pid: "11", label: "Throttle",    unit: "%",    max: 100,  bytes: 1, every: 1,
     decode: (a) => (a * 100) / 255 },
-  { pid: "04", label: "Engine load", unit: "%",    max: 100,  bytes: 1,
+  { pid: "04", label: "Engine load", unit: "%",    max: 100,  bytes: 1, every: 1,
     decode: (a) => (a * 100) / 255 },
-  { pid: "0F", label: "Intake air",  unit: "°C", max: 80, bytes: 1,
-    decode: (a) => a - 40 },
+
+  { pid: "05", label: "Coolant",     unit: "°F",   max: 260,  bytes: 1, every: 4,
+    decode: (a) => (a - 40) * 9 / 5 + 32 },
+  { pid: "0F", label: "Intake air",  unit: "°F",   max: 200,  bytes: 1, every: 4,
+    decode: (a) => (a - 40) * 9 / 5 + 32 },
+
+  // (A - 128) * 100/128, so 0 % means the ECU is not correcting.
+  // Positive = adding fuel (running lean), negative = pulling fuel.
+  { pid: "06", label: "Short trim B1", unit: "%", max: 25, bytes: 1, every: 2, bipolar: true,
+    decode: (a) => (a - 128) * 100 / 128 },
+  { pid: "07", label: "Long trim B1",  unit: "%", max: 25, bytes: 1, every: 2, bipolar: true,
+    decode: (a) => (a - 128) * 100 / 128 },
+  { pid: "08", label: "Short trim B2", unit: "%", max: 25, bytes: 1, every: 2, bipolar: true,
+    decode: (a) => (a - 128) * 100 / 128 },
+  { pid: "09", label: "Long trim B2",  unit: "%", max: 25, bytes: 1, every: 2, bipolar: true,
+    decode: (a) => (a - 128) * 100 / 128 },
 ];
 
 let port = null, writer = null, reader = null;
@@ -366,6 +408,128 @@ function extractPid(hex, pid, byteCount) {
 }
 
 // ---------------------------------------------------------------
+// Diagnostic trouble codes
+// ---------------------------------------------------------------
+
+// A DTC is two bytes: the top two bits pick the system letter, the
+// next two are the first digit, and the remaining 12 bits are three
+// hex digits. 0000 is padding, not a code.
+function decodeDtcPair(a, b) {
+  if (a === 0 && b === 0) return null;
+  const letter = "PCBU"[(a >> 6) & 0x03];
+  const d1 = (a >> 4) & 0x03;
+  const d2 = a & 0x0F;
+  const d3 = (b >> 4) & 0x0F;
+  const d4 = b & 0x0F;
+  return letter + d1 + d2.toString(16).toUpperCase() +
+         d3.toString(16).toUpperCase() + d4.toString(16).toUpperCase();
+}
+
+// Pulls DTCs out of a mode 03/07 reply. The adapter emits ISO 9141-2
+// headers and splits long lists across frames, so walk each frame from
+// its own response marker rather than assuming one contiguous payload.
+function parseDtcReply(hex, mode) {
+  const marker = mode === "03" ? "43" : "47";
+  const codes = [];
+
+  // Split on the header when present; otherwise treat it as one frame.
+  const frames = hex.includes("486B") ? hex.split(/(?=486B)/) : [hex];
+
+  for (const frame of frames) {
+    const at = frame.indexOf(marker);
+    if (at < 0) continue;
+    // Drop the trailing checksum byte on headered frames.
+    let body = frame.slice(at + 2);
+    if (frame.startsWith("486B") && body.length >= 2) body = body.slice(0, -2);
+
+    for (let i = 0; i + 3 < body.length + 1; i += 4) {
+      const pair = body.slice(i, i + 4);
+      if (pair.length < 4) break;
+      const a = parseInt(pair.slice(0, 2), 16);
+      const b = parseInt(pair.slice(2, 4), 16);
+      if (Number.isNaN(a) || Number.isNaN(b)) break;
+      const code = decodeDtcPair(a, b);
+      if (code && !codes.includes(code)) codes.push(code);
+    }
+  }
+  return codes;
+}
+
+function renderDtcs(stored, pending, milOn, count) {
+  const mil = $("milStatus");
+  if (milOn === null) {
+    mil.innerHTML = "";
+  } else {
+    mil.className = "mil " + (milOn ? "on" : "off");
+    mil.textContent = milOn
+      ? "Check engine light ON — " + count + " stored code" + (count === 1 ? "" : "s")
+      : "Check engine light off";
+  }
+
+  const list = $("dtcList");
+  list.innerHTML = "";
+
+  if (stored.length === 0 && pending.length === 0) {
+    list.innerHTML = '<p class="hint">No trouble codes reported.</p>';
+    return;
+  }
+
+  for (const [codes, kind] of [[stored, "stored"], [pending, "pending"]]) {
+    for (const c of codes) {
+      const row = document.createElement("div");
+      row.className = "dtc";
+      row.innerHTML = "<code></code><span></span>";
+      row.querySelector("code").textContent = c;
+      row.querySelector("span").textContent = kind;
+      list.appendChild(row);
+    }
+  }
+
+  const note = document.createElement("p");
+  note.className = "hint";
+  note.style.marginTop = "12px";
+  note.textContent = "Look each code up for your specific make — the same " +
+                     "code can mean different things across manufacturers.";
+  list.appendChild(note);
+}
+
+function readDtcs() {
+  return enqueue(async () => {
+    setBusy(true);
+    $("dtcList").innerHTML = '<p class="hint">Reading…</p>';
+
+    let milOn = null, count = 0;
+    const statusReply = await sendAndWaitInner("0101", 8000);
+    if (statusReply) {
+      const bytes = extractPid(cleanHex(statusReply), "01", 1);
+      if (bytes) {
+        milOn = (bytes[0] & 0x80) !== 0;
+        count = bytes[0] & 0x7F;
+      }
+    }
+
+    const storedReply = await sendAndWaitInner("03", 10000);
+    const pendingReply = await sendAndWaitInner("07", 10000);
+
+    const stored = storedReply ? parseDtcReply(cleanHex(storedReply), "03") : [];
+    const pending = pendingReply ? parseDtcReply(cleanHex(pendingReply), "07") : [];
+
+    renderDtcs(stored, pending, milOn, count);
+    setBusy(false);
+  });
+}
+
+// Same as sendAndWait but without re-entering the queue -- callers
+// here already hold it.
+async function sendAndWaitInner(text, timeoutMs) {
+  const done = waitForLine((l) => l.startsWith("<<"), timeoutMs);
+  await send(text);
+  const reply = await done;
+  await new Promise((r) => setTimeout(r, 120));
+  return reply;
+}
+
+// ---------------------------------------------------------------
 // UI state
 // ---------------------------------------------------------------
 function setUsb(on) {
@@ -383,6 +547,7 @@ function setBt(on) {
   $("txtBt").textContent = on ? "Adapter linked" : "Adapter not linked";
   $("btnInit").disabled = !on || busy;
   $("btnPoll").disabled = !on || busy;
+  $("btnDtc").disabled = !on || busy;
   if (!on) stopPolling();
 }
 
@@ -392,6 +557,7 @@ function setBusy(on) {
   busy = on;
   $("btnInit").disabled = on || !btLinked;
   $("btnPoll").disabled = on || !btLinked;
+  $("btnDtc").disabled = on || !btLinked;
   $("btnScan").disabled = on || !port;
   $("btnInit").textContent = on ? "Probing…" : "Probe (init)";
 }
@@ -432,7 +598,7 @@ function buildGauges() {
     el.innerHTML =
       '<div class="lbl"></div>' +
       '<div class="val stale">--<span class="unit"></span></div>' +
-      '<div class="track"><div></div></div>';
+      '<div class="track' + (g.bipolar ? " bipolar" : "") + '"><div></div></div>';
     el.querySelector(".lbl").textContent = g.label;
     el.querySelector(".unit").textContent = " " + g.unit;
     wrap.appendChild(el);
@@ -443,10 +609,19 @@ function buildGauges() {
 function updateGauge(g, value) {
   const val = g.el.querySelector(".val");
   const shown = g.unit === "rpm" ? Math.round(value) : Math.round(value * 10) / 10;
-  val.firstChild.nodeValue = String(shown);
+  val.firstChild.nodeValue = (g.bipolar && shown > 0 ? "+" : "") + shown;
   val.classList.remove("stale");
-  const pct = Math.max(0, Math.min(100, (value / g.max) * 100));
-  g.el.querySelector(".track > div").style.width = pct + "%";
+
+  const bar = g.el.querySelector(".track > div");
+  if (g.bipolar) {
+    // Grow out from the centre line in whichever direction.
+    const half = Math.min(50, (Math.abs(value) / g.max) * 50);
+    bar.style.width = half + "%";
+    bar.style.marginLeft = (value >= 0 ? 50 : 50 - half) + "%";
+    bar.style.background = Math.abs(value) > 10 ? "var(--warn)" : "var(--good)";
+  } else {
+    bar.style.width = Math.max(0, Math.min(100, (value / g.max) * 100)) + "%";
+  }
 }
 
 // Shows why a gauge has no number, rather than leaving a stale one.
@@ -478,9 +653,12 @@ async function doScan() {
 // One PID per round trip, in sequence. ISO 9141-2 cannot service
 // overlapping requests, and the adapter answers one at a time anyway.
 async function pollLoop() {
+  let cycle = 0;
   while (polling) {
+    cycle++;
     for (const g of GAUGES) {
       if (!polling) break;
+      if (cycle % (g.every || 1) !== 0) continue;
 
       const reply = await sendAndWait("01" + g.pid, 6000);
       if (!polling) break;
@@ -534,6 +712,7 @@ $("btnUsb").onclick = connectUsb;
 $("btnScan").onclick = doScan;
 $("btnInit").onclick = () => { stopPolling(); runInit(); };
 $("btnPoll").onclick = () => (polling ? stopPolling() : startPolling());
+$("btnDtc").onclick = () => { stopPolling(); readDtcs(); };
 $("btnSend").onclick = sendFromBox;
 $("cmd").addEventListener("keydown", (e) => { if (e.key === "Enter") sendFromBox(); });
 
