@@ -40,7 +40,38 @@ The OBD-II adapter is wireless (Bluetooth) — nothing to wire there
 besides plugging it into the car's OBD-II port and powering the ESP32
 (USB power bank, or a 5V buck converter off the car's 12V system).
 
-## First time? Start with bring-up
+## Easiest path: the browser console
+
+`tools/obd-console.html` is a point-and-click front end for the
+bring-up firmware — no terminal needed. Flash once, then drive
+everything from a web page:
+
+```
+pio run -t upload            # flash the bring-up firmware
+open -a "Google Chrome" tools/obd-console.html
+```
+
+Click **Connect USB**, pick the ESP32's port, then **Scan** → click
+your adapter in the list → **Probe** → **Start live data**.
+
+It shows discovered adapters with signal bars, live gauges for RPM,
+speed, coolant, throttle, engine load and intake air temp, and a
+colour-coded log of every byte exchanged. There's a box for sending
+raw commands too, so nothing the terminal can do is lost.
+
+**Chrome or Edge only** — it uses WebSerial, which Safari and Firefox
+don't implement. If the page loads but can't see the port, serve it
+over localhost instead of `file://`:
+
+```
+python3 -m http.server -d tools 8000
+# then open http://localhost:8000/obd-console.html
+```
+
+Close the page (or any `pio device monitor`) before flashing — the
+serial port only allows one reader at a time.
+
+## Prefer the terminal? Start with bring-up
 
 Before flashing the gauge firmware, prove the Bluetooth link and find
 out what the module actually speaks. There is a dedicated raw terminal

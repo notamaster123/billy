@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OBD-II Console</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e222b;
+    --line: #2a2f3a;
+    --text: #e6e9ef;
+    --muted: #8b93a3;
+    --accent: #4da3ff;
+    --good: #3ecf8e;
+    --warn: #f5a524;
+    --bad: #f45b5b;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 14px 20px; background: var(--panel); border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; z-index: 10;
+  }
+  h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  .spacer { flex: 1; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 5px 11px; border-radius: 999px; font-size: 13px;
+    background: var(--panel-2); border: 1px solid var(--line);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
+  .dot.on { background: var(--good); }
+  .dot.mid { background: var(--warn); }
+  button {
+    font: inherit; font-size: 14px; color: var(--text);
+    background: var(--panel-2); border: 1px solid var(--line);
+    padding: 8px 14px; border-radius: 8px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #05121f; font-weight: 600; }
+  main { padding: 20px; display: grid; gap: 18px; grid-template-columns: 320px 1fr; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .panel h2 {
+    margin: 0; padding: 12px 16px; font-size: 13px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .7px; color: var(--muted);
+    border-bottom: 1px solid var(--line);
+  }
+  .panel .body { padding: 14px 16px; }
+  .device {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    text-align: left; margin-bottom: 8px; padding: 11px 12px;
+  }
+  .device:last-child { margin-bottom: 0; }
+  .device .nm { font-weight: 600; }
+  .device .mac { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .bars { display: flex; gap: 2px; align-items: flex-end; height: 18px; }
+  .bars i { width: 4px; background: var(--line); border-radius: 1px; }
+  .bars i:nth-child(1) { height: 5px; }
+  .bars i:nth-child(2) { height: 9px; }
+  .bars i:nth-child(3) { height: 13px; }
+  .bars i:nth-child(4) { height: 18px; }
+  .bars.s1 i:nth-child(-n+1), .bars.s2 i:nth-child(-n+2),
+  .bars.s3 i:nth-child(-n+3), .bars.s4 i:nth-child(-n+4) { background: var(--good); }
+  .bars.s1 i:nth-child(-n+1) { background: var(--bad); }
+  .bars.s2 i:nth-child(-n+2) { background: var(--warn); }
+  .gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+  .gauge { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .gauge .lbl { font-size: 12px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); }
+  .gauge .val { font-size: 34px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.15; }
+  .gauge .val.stale { color: var(--muted); }
+  .gauge .unit { font-size: 14px; color: var(--muted); font-weight: 400; margin-left: 4px; }
+  .track { height: 4px; background: var(--line); border-radius: 2px; margin-top: 9px; overflow: hidden; }
+  .track > div { height: 100%; background: var(--accent); width: 0; transition: width .18s ease; }
+  #log {
+    font-family: var(--mono); font-size: 12px; line-height: 1.55;
+    height: 320px; overflow-y: auto; padding: 12px 16px;
+    white-space: pre-wrap; word-break: break-all; background: #0b0d11;
+  }
+  #log .tx { color: var(--accent); }
+  #log .rx { color: var(--good); }
+  #log .sys { color: var(--muted); }
+  #log .err { color: var(--bad); }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row input[type=text] {
+    flex: 1; font-family: var(--mono); font-size: 13px; color: var(--text);
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 9px 11px;
+  }
+  .hint { color: var(--muted); font-size: 13px; margin: 0; }
+  .hint code { font-family: var(--mono); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+  .banner { margin: 20px; padding: 16px 18px; border-radius: 10px; background: #3a1d1d; border: 1px solid var(--bad); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>OBD-II Console</h1>
+  <span class="pill"><span class="dot" id="dotUsb"></span><span id="txtUsb">USB not connected</span></span>
+  <span class="pill"><span class="dot" id="dotBt"></span><span id="txtBt">Adapter not linked</span></span>
+  <span class="spacer"></span>
+  <button class="primary" id="btnUsb">Connect USB</button>
+  <button id="btnScan" disabled>Scan</button>
+  <button id="btnInit" disabled>Probe (init)</button>
+  <button id="btnPoll" disabled>Start live data</button>
+</header>
+
+<div id="unsupported" class="banner" hidden>
+  <strong>This browser can't talk to serial devices.</strong>
+  WebSerial is required — use Chrome or Edge. Safari and Firefox don't support it.
+</div>
+
+<main>
+  <div style="display:grid; gap:18px;">
+    <section class="panel">
+      <h2>Adapters</h2>
+      <div class="body" id="devices">
+        <p class="hint">Connect USB, then hit <b>Scan</b>. Found adapters appear here — click one to link.</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Send command</h2>
+      <div class="body">
+        <div class="row">
+          <input type="text" id="cmd" placeholder="e.g. 010C, ATRV, /help" autocomplete="off">
+          <button id="btnSend" disabled>Send</button>
+        </div>
+        <p class="hint" style="margin-top:10px">
+          Anything not starting with <code>/</code> goes straight to the adapter.
+        </p>
+      </div>
+    </section>
+  </div>
+
+  <div style="display:grid; gap:18px;">
+    <section class="panel">
+      <h2>Live data</h2>
+      <div class="body">
+        <div class="gauges" id="gauges"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Log</h2>
+      <div id="log"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------
+// Gauges. `pid` is the mode-01 PID; `decode` turns the data bytes
+// (already hex, header stripped) into a display value.
+// ---------------------------------------------------------------
+const GAUGES = [
+  { pid: "0C", label: "Engine RPM",  unit: "rpm",  max: 7000, bytes: 2,
+    decode: (a, b) => (a * 256 + b) / 4 },
+  { pid: "0D", label: "Speed",       unit: "km/h", max: 200,  bytes: 1,
+    decode: (a) => a },
+  { pid: "05", label: "Coolant",     unit: "°C", max: 130, bytes: 1,
+    decode: (a) => a - 40 },
+  { pid: "11", label: "Throttle",    unit: "%",    max: 100,  bytes: 1,
+    decode: (a) => (a * 100) / 255 },
+  { pid: "04", label: "Engine load", unit: "%",    max: 100,  bytes: 1,
+    decode: (a) => (a * 100) / 255 },
+  { pid: "0F", label: "Intake air",  unit: "°C", max: 80, bytes: 1,
+    decode: (a) => a - 40 },
+];
+
+let port = null, writer = null, reader = null;
+let rxBuffer = "";
+let awaiting = null;      // { resolve, timer } for the in-flight command
+let polling = false;
+let btLinked = false;
+
+const $ = (id) => document.getElementById(id);
+
+// ---------------------------------------------------------------
+// Log
+// ---------------------------------------------------------------
+function log(text, cls = "sys") {
+  const el = $("log");
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  const span = document.createElement("span");
+  span.className = cls;
+  span.textContent = text + "\n";
+  el.appendChild(span);
+  while (el.childNodes.length > 800) el.removeChild(el.firstChild);
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
+
+// ---------------------------------------------------------------
+// Serial
+// ---------------------------------------------------------------
+async function connectUsb() {
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+  } catch (err) {
+    if (err && err.name === "NotFoundError") return;  // user cancelled the picker
+    log("Could not open port: " + err, "err");
+    return;
+  }
+
+  const encoder = new TextEncoderStream();
+  encoder.readable.pipeTo(port.writable).catch(() => {});
+  writer = encoder.writable.getWriter();
+
+  setUsb(true);
+  log("USB connected at 115200 baud", "sys");
+  log("Tip: press EN on the ESP32 if you see nothing.", "sys");
+  readLoop();
+}
+
+async function readLoop() {
+  const decoder = new TextDecoderStream();
+  port.readable.pipeTo(decoder.writable).catch(() => {});
+  reader = decoder.readable.getReader();
+
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      rxBuffer += value;
+      let nl;
+      while ((nl = rxBuffer.indexOf("\n")) >= 0) {
+        const line = rxBuffer.slice(0, nl).replace(/\r/g, "");
+        rxBuffer = rxBuffer.slice(nl + 1);
+        handleLine(line);
+      }
+    }
+  } catch (err) {
+    log("Serial read stopped: " + err, "err");
+  }
+  setUsb(false);
+}
+
+async function send(text) {
+  if (!writer) return;
+  log(">> " + text, "tx");
+  await writer.write(text + "\r\n");
+}
+
+// Sends a command and resolves with the adapter's reply line. The
+// firmware prefixes replies with "<<", so that is the completion
+// marker. Resolves null on timeout rather than hanging the UI.
+function sendAndWait(text, timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    if (awaiting) { resolve(null); return; }
+    awaiting = {
+      resolve,
+      timer: setTimeout(() => { awaiting = null; resolve(null); }, timeoutMs),
+    };
+    send(text);
+  });
+}
+
+// ---------------------------------------------------------------
+// Parsing the firmware's output
+// ---------------------------------------------------------------
+const SCAN_RE = /^\s*\[(\d+)\]\s+(.+?)\s\s+([0-9a-fA-F:]{17})\s+RSSI\s+(-?\d+)/;
+
+function handleLine(line) {
+  if (!line.trim()) return;
+
+  const scan = SCAN_RE.exec(line);
+  if (scan) {
+    addDevice(scan[2].trim(), scan[3], parseInt(scan[4], 10));
+    log(line, "rx");
+    return;
+  }
+
+  if (/SPP link UP/.test(line)) setBt(true);
+  if (/SPP link FAILED/.test(line)) setBt(false);
+  if (/link dropped/i.test(line)) setBt(false);
+
+  if (line.startsWith("<<")) {
+    log(line, "rx");
+    if (awaiting) {
+      clearTimeout(awaiting.timer);
+      const done = awaiting.resolve;
+      awaiting = null;
+      done(line);
+    }
+    return;
+  }
+
+  log(line, line.startsWith(">>") ? "tx" : "sys");
+}
+
+// The firmware prints replies with control characters spelled out so
+// they are visible in a terminal. Undo that to get raw hex.
+function cleanHex(replyLine) {
+  return replyLine
+    .replace(/^<<\s*/, "")
+    .replace(/\(unsolicited\)/g, "")
+    .replace(/<CR>|<LF>|<PROMPT>/g, "")
+    .replace(/<[0-9A-Fa-f]{2}>/g, "")
+    .replace(/[^0-9A-Fa-f]/g, "")
+    .toUpperCase();
+}
+
+// Finds "41<pid>" anywhere in the frame. This adapter emits ISO 9141-2
+// headers (e.g. 48 6B 12) even with ATH0, so the payload is not at the
+// start of the reply.
+function extractPid(hex, pid, byteCount) {
+  const tag = "41" + pid.toUpperCase();
+  const at = hex.indexOf(tag);
+  if (at < 0) return null;
+  const data = hex.slice(at + 4);
+  if (data.length < byteCount * 2) return null;
+  const bytes = [];
+  for (let i = 0; i < byteCount; i++) {
+    bytes.push(parseInt(data.slice(i * 2, i * 2 + 2), 16));
+  }
+  if (bytes.some(Number.isNaN)) return null;
+  return bytes;
+}
+
+// ---------------------------------------------------------------
+// UI state
+// ---------------------------------------------------------------
+function setUsb(on) {
+  $("dotUsb").className = "dot" + (on ? " on" : "");
+  $("txtUsb").textContent = on ? "USB connected" : "USB not connected";
+  $("btnUsb").disabled = on;
+  $("btnScan").disabled = !on;
+  $("btnSend").disabled = !on;
+  if (!on) { setBt(false); stopPolling(); }
+}
+
+function setBt(on) {
+  btLinked = on;
+  $("dotBt").className = "dot" + (on ? " on" : "");
+  $("txtBt").textContent = on ? "Adapter linked" : "Adapter not linked";
+  $("btnInit").disabled = !on;
+  $("btnPoll").disabled = !on;
+  if (!on) stopPolling();
+}
+
+const seenDevices = new Map();
+
+function addDevice(name, mac, rssi) {
+  if (seenDevices.has(mac)) return;
+  seenDevices.set(mac, true);
+
+  if (seenDevices.size === 1) $("devices").innerHTML = "";
+
+  const strength = rssi > -60 ? 4 : rssi > -70 ? 3 : rssi > -85 ? 2 : 1;
+  const btn = document.createElement("button");
+  btn.className = "device";
+  btn.innerHTML =
+    '<span class="bars s' + strength + '"><i></i><i></i><i></i><i></i></span>' +
+    '<span><span class="nm"></span><br><span class="mac"></span></span>';
+  btn.querySelector(".nm").textContent = name;
+  btn.querySelector(".mac").textContent = mac + "  ·  " + rssi + " dBm";
+  btn.onclick = async () => {
+    log("Linking to " + name + " (" + mac + ")", "sys");
+    await send("/connect " + mac);
+  };
+  $("devices").appendChild(btn);
+}
+
+function buildGauges() {
+  const wrap = $("gauges");
+  wrap.innerHTML = "";
+  for (const g of GAUGES) {
+    const el = document.createElement("div");
+    el.className = "gauge";
+    el.innerHTML =
+      '<div class="lbl"></div>' +
+      '<div class="val stale">--<span class="unit"></span></div>' +
+      '<div class="track"><div></div></div>';
+    el.querySelector(".lbl").textContent = g.label;
+    el.querySelector(".unit").textContent = " " + g.unit;
+    wrap.appendChild(el);
+    g.el = el;
+  }
+}
+
+function updateGauge(g, value) {
+  const val = g.el.querySelector(".val");
+  const shown = g.unit === "rpm" ? Math.round(value) : Math.round(value * 10) / 10;
+  val.firstChild.nodeValue = String(shown);
+  val.classList.remove("stale");
+  const pct = Math.max(0, Math.min(100, (value / g.max) * 100));
+  g.el.querySelector(".track > div").style.width = pct + "%";
+}
+
+// ---------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------
+async function doScan() {
+  seenDevices.clear();
+  $("devices").innerHTML = '<p class="hint">Scanning for 10 seconds…</p>';
+  $("btnScan").disabled = true;
+  await send("/scan");
+  setTimeout(() => {
+    $("btnScan").disabled = false;
+    if (seenDevices.size === 0) {
+      $("devices").innerHTML =
+        '<p class="hint">Nothing found. Is the adapter powered (ignition on) ' +
+        'and not held by a phone or laptop?</p>';
+    }
+  }, 13000);
+}
+
+// One PID per round trip, in sequence. ISO 9141-2 cannot service
+// overlapping requests, and the adapter answers one at a time anyway.
+async function pollLoop() {
+  while (polling) {
+    for (const g of GAUGES) {
+      if (!polling) break;
+      const reply = await sendAndWait("01" + g.pid, 6000);
+      if (!reply) continue;
+      const bytes = extractPid(cleanHex(reply), g.pid, g.bytes);
+      if (bytes) updateGauge(g, g.decode.apply(null, bytes));
+    }
+    await new Promise((r) => setTimeout(r, 60));
+  }
+}
+
+function startPolling() {
+  if (polling) return;
+  polling = true;
+  $("btnPoll").textContent = "Stop live data";
+  $("btnPoll").classList.add("primary");
+  pollLoop();
+}
+
+function stopPolling() {
+  polling = false;
+  $("btnPoll").textContent = "Start live data";
+  $("btnPoll").classList.remove("primary");
+}
+
+// ---------------------------------------------------------------
+// Wiring
+// ---------------------------------------------------------------
+buildGauges();
+
+if (!("serial" in navigator)) {
+  $("unsupported").hidden = false;
+  $("btnUsb").disabled = true;
+}
+
+$("btnUsb").onclick = connectUsb;
+$("btnScan").onclick = doScan;
+$("btnInit").onclick = () => send("/init");
+$("btnPoll").onclick = () => (polling ? stopPolling() : startPolling());
+$("btnSend").onclick = sendFromBox;
+$("cmd").addEventListener("keydown", (e) => { if (e.key === "Enter") sendFromBox(); });
+
+function sendFromBox() {
+  const box = $("cmd");
+  const text = box.value.trim();
+  if (!text) return;
+  send(text);
+  box.value = "";
+}
+
+window.addEventListener("beforeunload", () => { polling = false; });
+</script>
+</body>
+</html>
