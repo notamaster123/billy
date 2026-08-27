@@ -15,6 +15,10 @@ static Screen currentScreen = Screen::DASH;
 static bool simulating = START_IN_SIMULATION;
 static VehicleData simData;
 
+static uint8_t brightness = OLED_CONTRAST;
+static bool inverted = OLED_START_INVERTED;
+static SetupField editing = SetupField::NONE;
+
 // Formats the adapter MAC once; it never changes.
 static char macText[18];
 
@@ -22,6 +26,21 @@ static void handleRotation(int detents) {
     if (detents == 0) {
         return;
     }
+
+    // While a SETUP row is selected the knob drives that value rather
+    // than moving between screens.
+    if (editing == SetupField::BRIGHTNESS) {
+        int next = constrain(static_cast<int>(brightness) + detents * 16, 0, 255);
+        brightness = static_cast<uint8_t>(next);
+        displayManager.setContrast(brightness);
+        return;
+    }
+    if (editing == SetupField::INVERT) {
+        inverted = !inverted;
+        displayManager.setInverted(inverted);
+        return;
+    }
+
     int next = (static_cast<int>(currentScreen) + detents) % SCREEN_COUNT;
     if (next < 0) {
         next += SCREEN_COUNT;
@@ -48,6 +67,16 @@ static void handleShortPress() {
             }
             break;
 
+        case Screen::SETUP: {
+            // Cycle: navigate -> brightness -> invert -> navigate.
+            uint8_t next = static_cast<uint8_t>(editing) + 1;
+            if (next >= static_cast<uint8_t>(SetupField::COUNT)) {
+                next = 0;
+            }
+            editing = static_cast<SetupField>(next);
+            break;
+        }
+
         default:
             break;
     }
@@ -71,6 +100,8 @@ void setup() {
     if (!displayManager.begin()) {
         Serial.println("OLED not found - check wiring and I2C address");
     }
+    displayManager.setContrast(brightness);
+    displayManager.setInverted(inverted);
     displayManager.showSplash();
 
     encoder.begin();
@@ -115,6 +146,9 @@ void loop() {
     status.linkText = simulating ? "simulated" : obdManager.statusText();
     status.adapterName = OBD_BT_DEVICE_NAME;
     status.adapterMac = macText;
+    status.brightness = brightness;
+    status.inverted = inverted;
+    status.editing = editing;
 
     displayManager.render(currentScreen, simulating ? simData : obdManager.data(), status);
 }

@@ -58,9 +58,33 @@ Short press does nothing on screens with no action. On **CODES** it
 re-reads trouble codes; on **STATUS** it connects or disconnects the
 adapter.
 
+## Appearance: what can and cannot change
+
+The panel is **monochrome** — every pixel is on or off, and the colour
+comes from the emitter material fixed at manufacture. It cannot be
+changed in software. Dual-colour panels (yellow top 16 rows, blue
+bottom 48) are the same story: two phosphor regions on one glass, not
+a setting.
+
+What *is* adjustable, both from the **SETUP** screen and as defaults in
+`include/config.h`:
+
+| Control | Config | Notes |
+|---------|--------|-------|
+| Brightness | `OLED_CONTRAST` | 0x00–0xFF, useful at night |
+| Invert | `OLED_START_INVERTED` | dark text on a lit background |
+
+On SETUP, short press cycles the knob between *navigating screens* →
+*brightness* → *invert* → back. A `>` marks the row the knob is
+driving, so it is never ambiguous whether turning will change a value
+or change screens.
+
+Settings are not persisted across reboots yet; they reset to the
+`config.h` defaults.
+
 ## Screens
 
-Turn the knob to move between five screens. The header shows the
+Turn the knob to move between six screens. The header shows the
 screen name and the mode badge (`SIM` / `LIVE` / `----`), and dots
 along the bottom show your position.
 
@@ -71,6 +95,7 @@ along the bottom show your position.
 4. **CODES** — check-engine state, stored count, and the codes
 5. **STATUS** — mode, link state, adapter name and MAC, and what the
    button will do
+6. **SETUP** — brightness and invert (see above)
 
 The fuel trim bars are centred rather than left-anchored because 0 %
 means "the ECU is not correcting" — the meaningful reference point. A

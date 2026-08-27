@@ -82,6 +82,14 @@ static uint8_t OBD_MAC_ADDRESS[6] = {0xDC, 0x0D, 0x30, 0xA9, 0xC0, 0x5E};
 #define OLED_DC_PIN 17
 #define OLED_CS_PIN 5
 
+// --- Appearance ---------------------------------------------------
+//
+// A mono OLED's colour is fixed by the emitter material, so it cannot
+// be changed in software. Brightness and inversion can be, and both
+// are adjustable at runtime from the SETUP screen.
+#define OLED_CONTRAST 0xCF  // 0x00 dim .. 0xFF bright
+#define OLED_START_INVERTED 0
+
 // --- I2C wiring (only when DISPLAY_USE_SPI is 0) ------------------
 #define OLED_I2C_ADDRESS 0x3C
 #define OLED_SDA_PIN 21

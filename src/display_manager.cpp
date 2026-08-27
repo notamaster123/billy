@@ -44,7 +44,7 @@ namespace {
 constexpr int16_t BODY_TOP = 13;
 
 const char *SCREEN_TITLES[SCREEN_COUNT] = {
-    "DASH", "TEMPS", "TRIMS", "CODES", "STATUS",
+    "DASH", "TEMPS", "TRIMS", "CODES", "STATUS", "SETUP",
 };
 
 // Right-aligns text at `rightEdge` for the current text size, so
@@ -272,6 +272,57 @@ void DisplayManager::drawStatus(const SystemStatus &status) {
     }
 }
 
+void DisplayManager::setContrast(uint8_t level) {
+#if DISPLAY_IS_SH1106
+    display.setContrast(level);
+#else
+    // Adafruit_SSD1306 exposes only dim(); set the contrast register
+    // directly for finer control.
+    display.ssd1306_command(SSD1306_SETCONTRAST);
+    display.ssd1306_command(level);
+#endif
+}
+
+void DisplayManager::setInverted(bool inverted) {
+    display.invertDisplay(inverted);
+}
+
+// Two editable rows. A ">" marks the one the knob is currently
+// driving, so it is obvious when turning changes a value instead of
+// changing screens.
+void DisplayManager::drawSetup(const SystemStatus &status) {
+    display.setTextSize(1);
+
+    const int16_t rowY[2] = {BODY_TOP, BODY_TOP + 14};
+    const SetupField rowField[2] = {SetupField::BRIGHTNESS, SetupField::INVERT};
+
+    for (uint8_t i = 0; i < 2; i++) {
+        if (status.editing == rowField[i]) {
+            display.setCursor(0, rowY[i]);
+            display.print(">");
+        }
+        display.setCursor(8, rowY[i]);
+        display.print(i == 0 ? "Bright" : "Invert");
+    }
+
+    // Brightness bar
+    const int16_t barLeft = 58, barWidth = 68;
+    display.drawRect(barLeft, rowY[0], barWidth, 8, OLED_WHITE);
+    int16_t fill = static_cast<int16_t>((status.brightness / 255.0f) * (barWidth - 2));
+    if (fill > 0) {
+        display.fillRect(barLeft + 1, rowY[0] + 1, fill, 6, OLED_WHITE);
+    }
+
+    printRightAligned(status.inverted ? "ON" : "OFF", SCREEN_WIDTH, rowY[1], 1);
+
+    display.setCursor(0, BODY_TOP + 34);
+    if (status.editing == SetupField::NONE) {
+        display.print("press: edit");
+    } else {
+        display.print("turn: change value");
+    }
+}
+
 void DisplayManager::render(Screen screen, const VehicleData &data, const SystemStatus &status) {
     display.clearDisplay();
     display.setTextColor(OLED_WHITE);
@@ -284,6 +335,7 @@ void DisplayManager::render(Screen screen, const VehicleData &data, const System
         case Screen::TRIMS:  drawTrims(data);     break;
         case Screen::CODES:  drawCodes(data);     break;
         case Screen::STATUS: drawStatus(status);  break;
+        case Screen::SETUP:  drawSetup(status);   break;
         default: break;
     }
 
