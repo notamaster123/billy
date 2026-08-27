@@ -1,0 +1,116 @@
+#include "obd_manager.h"
+#include "config.h"
+
+#include <Arduino.h>
+
+void OBDManager::begin() {
+    serialBT.begin(OBD_LOCAL_BT_NAME, true);
+}
+
+void OBDManager::loop() {
+    if (state == ObdState::DISCONNECTED) {
+        if (millis() - lastReconnectAttempt >= OBD_RECONNECT_INTERVAL_MS) {
+            lastReconnectAttempt = millis();
+            tryConnect();
+        }
+        return;
+    }
+
+    if (!serialBT.connected()) {
+        Serial.println("Bluetooth link to OBD-II adapter dropped");
+        state = ObdState::DISCONNECTED;
+        vehicleData = VehicleData();
+        return;
+    }
+
+    pollNextPid();
+}
+
+void OBDManager::tryConnect() {
+    Serial.println("Connecting to OBD-II adapter...");
+
+#if OBD_USE_MAC_ADDRESS
+    bool linked = serialBT.connect(const_cast<uint8_t *>(OBD_MAC_ADDRESS));
+#else
+    bool linked = serialBT.connect(OBD_BT_DEVICE_NAME);
+#endif
+
+    if (!linked) {
+        Serial.println("Bluetooth connect failed, will retry");
+        return;
+    }
+
+    if (!elm.begin(serialBT, false, ELM327_TIMEOUT_MS)) {
+        Serial.println("ELM327 did not respond, will retry");
+        serialBT.disconnect();
+        return;
+    }
+
+    Serial.println("ELM327 ready");
+    state = ObdState::CONNECTED;
+    currentPid = Pid::RPM;
+}
+
+void OBDManager::advancePid() {
+    currentPid = static_cast<Pid>((static_cast<int>(currentPid) + 1) % static_cast<int>(Pid::COUNT));
+}
+
+void OBDManager::pollNextPid() {
+    switch (currentPid) {
+        case Pid::RPM: {
+            float value = elm.rpm();
+            if (elm.nb_rx_state == ELM_SUCCESS) {
+                vehicleData.rpm = static_cast<int>(value);
+                vehicleData.rpmValid = true;
+                advancePid();
+            } else if (elm.nb_rx_state != ELM_GETTING_MSG) {
+                vehicleData.rpmValid = false;
+                advancePid();
+            }
+            break;
+        }
+
+        case Pid::SPEED: {
+            int32_t value = elm.kph();
+            if (elm.nb_rx_state == ELM_SUCCESS) {
+                vehicleData.speedKph = static_cast<int>(value);
+                vehicleData.speedValid = true;
+                advancePid();
+            } else if (elm.nb_rx_state != ELM_GETTING_MSG) {
+                vehicleData.speedValid = false;
+                advancePid();
+            }
+            break;
+        }
+
+        case Pid::COOLANT: {
+            float value = elm.engineCoolantTemp();
+            if (elm.nb_rx_state == ELM_SUCCESS) {
+                vehicleData.coolantTempC = static_cast<int>(value);
+                vehicleData.coolantValid = true;
+                advancePid();
+            } else if (elm.nb_rx_state != ELM_GETTING_MSG) {
+                vehicleData.coolantValid = false;
+                advancePid();
+            }
+            break;
+        }
+
+        case Pid::THROTTLE: {
+            float value = elm.throttle();
+            if (elm.nb_rx_state == ELM_SUCCESS) {
+                vehicleData.throttlePct = static_cast<int>(value);
+                vehicleData.throttleValid = true;
+                advancePid();
+            } else if (elm.nb_rx_state != ELM_GETTING_MSG) {
+                vehicleData.throttleValid = false;
+                advancePid();
+            }
+            break;
+        }
+
+        default:
+            advancePid();
+            break;
+    }
+}
