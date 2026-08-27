@@ -54,9 +54,36 @@ static uint8_t OBD_MAC_ADDRESS[6] = {0xDC, 0x0D, 0x30, 0xA9, 0xC0, 0x5E};
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
-#define OLED_I2C_ADDRESS 0x3C
 
-// ESP32 default I2C pins; change if the display is wired elsewhere.
+// Interface. This panel has 7 pins (GND VCC CLK MOSI RES DC CS), so
+// it is the SPI variant. Set to 0 only for a 4-pin I2C module
+// (GND VCC SDA SCL).
+#define DISPLAY_USE_SPI 1
+
+// --- SPI wiring ---------------------------------------------------
+//
+// Hardware SPI uses the ESP32's VSPI peripheral, whose CLK and MOSI
+// pins are fixed:
+//
+//   module CLK  -> GPIO18   (VSPI SCK)
+//   module MOSI -> GPIO23   (VSPI MOSI)
+//
+// Those two are not configurable below, because the Adafruit driver
+// calls SPI.begin() itself and would undo any remapping. DC, RES and
+// CS are ordinary GPIOs and can be moved freely.
+//
+// If you need CLK/MOSI on different pins, set DISPLAY_SPI_HARDWARE to
+// 0 to bit-bang instead; then OLED_CLK_PIN and OLED_MOSI_PIN apply.
+#define DISPLAY_SPI_HARDWARE 1
+
+#define OLED_CLK_PIN 18    // only used when DISPLAY_SPI_HARDWARE is 0
+#define OLED_MOSI_PIN 23   // only used when DISPLAY_SPI_HARDWARE is 0
+#define OLED_RES_PIN 16
+#define OLED_DC_PIN 17
+#define OLED_CS_PIN 5
+
+// --- I2C wiring (only when DISPLAY_USE_SPI is 0) ------------------
+#define OLED_I2C_ADDRESS 0x3C
 #define OLED_SDA_PIN 21
 #define OLED_SCL_PIN 22
 

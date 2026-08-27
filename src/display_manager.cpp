@@ -2,18 +2,39 @@
 
 #include "config.h"
 
+#if DISPLAY_USE_SPI
+#include <SPI.h>
+#else
 #include <Wire.h>
+#endif
 
 #if DISPLAY_IS_SH1106
 #include <Adafruit_SH110X.h>
-static Adafruit_SH1106G display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define OLED_WHITE SH110X_WHITE
 #define OLED_BLACK SH110X_BLACK
+#if !DISPLAY_USE_SPI
+static Adafruit_SH1106G display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+#elif DISPLAY_SPI_HARDWARE
+static Adafruit_SH1106G display(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, OLED_DC_PIN, OLED_RES_PIN,
+                                OLED_CS_PIN);
 #else
+static Adafruit_SH1106G display(SCREEN_WIDTH, SCREEN_HEIGHT, OLED_MOSI_PIN, OLED_CLK_PIN,
+                                OLED_DC_PIN, OLED_RES_PIN, OLED_CS_PIN);
+#endif
+
+#else  // SSD1306
 #include <Adafruit_SSD1306.h>
-static Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define OLED_WHITE SSD1306_WHITE
 #define OLED_BLACK SSD1306_BLACK
+#if !DISPLAY_USE_SPI
+static Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+#elif DISPLAY_SPI_HARDWARE
+static Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, OLED_DC_PIN, OLED_RES_PIN,
+                                OLED_CS_PIN);
+#else
+static Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, OLED_MOSI_PIN, OLED_CLK_PIN,
+                                OLED_DC_PIN, OLED_RES_PIN, OLED_CS_PIN);
+#endif
 #endif
 
 namespace {
@@ -51,16 +72,25 @@ void formatMetric(const VehicleData &data, Metric m, char *out, size_t len) {
 }  // namespace
 
 bool DisplayManager::begin() {
+#if !DISPLAY_USE_SPI
     Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
+#endif
 
 #if DISPLAY_IS_SH1106
-    if (!display.begin(OLED_I2C_ADDRESS, true)) {
+    // On SPI the address argument is ignored by the driver.
+    if (!display.begin(DISPLAY_USE_SPI ? 0 : OLED_I2C_ADDRESS, true)) {
+        return false;
+    }
+#else
+#if DISPLAY_USE_SPI
+    if (!display.begin(SSD1306_SWITCHCAPVCC)) {
         return false;
     }
 #else
     if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDRESS)) {
         return false;
     }
+#endif
 #endif
 
     display.setTextWrap(false);

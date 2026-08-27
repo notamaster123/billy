@@ -7,14 +7,28 @@ and no adapter.
 
 ## Wiring
 
-**OLED — Inland 1.3", SH1106, I2C**
+**OLED — Inland 1.3", SH1106, SPI**
 
-| OLED | ESP32 |
-|------|-------|
-| VCC  | 3V3 |
-| GND  | GND |
-| SDA  | GPIO21 |
-| SCL  | GPIO22 |
+This panel has 7 pins, which makes it the SPI variant (a 4-pin
+`GND VCC SDA SCL` module would be I2C — set `DISPLAY_USE_SPI` to 0 in
+`include/config.h` for that).
+
+| OLED | ESP32 | Notes |
+|------|-------|-------|
+| GND  | GND | |
+| VCC  | 3V3 | |
+| CLK  | GPIO18 | VSPI SCK — fixed |
+| MOSI | GPIO23 | VSPI MOSI — fixed |
+| RES  | GPIO16 | configurable |
+| DC   | GPIO17 | configurable |
+| CS   | GPIO5  | configurable |
+
+CLK and MOSI are fixed because hardware SPI uses the ESP32's VSPI
+peripheral and the Adafruit driver calls `SPI.begin()` itself, which
+would undo any pin remapping. To put them elsewhere, set
+`DISPLAY_SPI_HARDWARE` to 0 in `config.h` to bit-bang instead — then
+`OLED_CLK_PIN` and `OLED_MOSI_PIN` take effect. Slower, but a 1 KB
+mono frame at 10 fps has plenty of headroom.
 
 **Rotary encoder — KY-040 style**
 
