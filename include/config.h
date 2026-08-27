@@ -61,6 +61,32 @@ static uint8_t OBD_MAC_ADDRESS[6] = {0xDC, 0x0D, 0x30, 0xA9, 0xC0, 0x5E};
 #define OLED_SCL_PIN 22
 
 // ============================================================
+// Rotary encoder (KY-040 style: CLK, DT, SW)
+// ============================================================
+//
+// These three are free on the WROOM-32E: not strapping pins, not
+// input-only, and clear of the I2C pins the display uses. Wire the
+// encoder's + to 3V3 and GND to GND; internal pull-ups are enabled so
+// no external resistors are needed.
+
+#define ENCODER_CLK_PIN 32
+#define ENCODER_DT_PIN 33
+#define ENCODER_SW_PIN 25
+
+// Held longer than this counts as a long press.
+#define ENCODER_LONG_PRESS_MS 600
+#define ENCODER_DEBOUNCE_MS 25
+
+// ============================================================
+// Simulation
+// ============================================================
+
+// Boot into simulated data so the UI can be built and reviewed at a
+// desk with no car and no adapter. Long-press the encoder to switch
+// between SIM and LIVE at runtime.
+#define START_IN_SIMULATION 1
+
+// ============================================================
 // Timing
 // ============================================================
 
