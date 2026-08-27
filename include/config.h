@@ -25,11 +25,11 @@
 #define OBD_SCAN_ON_BOOT 0
 #define OBD_SCAN_DURATION_SEC 10
 
-// Name-based discovery (SDP lookup) can be slow or flaky. If
-// connecting by name fails, set this to 1 and fill in the MAC that
-// the boot scan reported.
-#define OBD_USE_MAC_ADDRESS 0
-static uint8_t OBD_MAC_ADDRESS[6] = {0x00, 0x1D, 0xA5, 0x00, 0x00, 0x00};
+// Name-based discovery (SDP lookup) is slow and flaky with most
+// ELM327 clones -- connecting straight to the MAC skips it. Confirmed
+// by scan: the adapter reports itself as "OBDII" at the MAC below.
+#define OBD_USE_MAC_ADDRESS 1
+static uint8_t OBD_MAC_ADDRESS[6] = {0xDC, 0x0D, 0x30, 0xA9, 0xC0, 0x5E};
 
 // Legacy pairing PIN, if the module demands one. Most ELM327-style
 // adapters use "1234" or "0000". Leave empty to skip setting a PIN.
