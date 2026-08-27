@@ -40,6 +40,19 @@ The OBD-II adapter is wireless (Bluetooth) — nothing to wire there
 besides plugging it into the car's OBD-II port and powering the ESP32
 (USB power bank, or a 5V buck converter off the car's 12V system).
 
+## First time? Start with bring-up
+
+Before flashing the gauge firmware, prove the Bluetooth link and find
+out what the module actually speaks. There is a dedicated raw terminal
+build for this:
+
+```
+pio run -e bringup -t upload
+pio device monitor
+```
+
+Then follow **[BRINGUP.md](BRINGUP.md)** — scan, connect, probe, sniff.
+
 ## Software setup
 
 This is a [PlatformIO](https://platformio.org/) project.
@@ -60,9 +73,9 @@ This is a [PlatformIO](https://platformio.org/) project.
    - `DISPLAY_IS_SH1106` — leave at `1` for the Inland 1.3" panel.
      Set to `0` only if you swap in a 0.96" SSD1306-based panel.
    - Set `OBD_SCAN_ON_BOOT` back to `0` once configured.
-5. Build and flash: `pio run -t upload` (or the PlatformIO toolbar
-   buttons). Open the serial monitor at 115200 baud (`pio device
-   monitor`) to see connection/debug logs.
+5. Build and flash the gauge firmware: `pio run -e esp32dev -t upload`.
+   Open the serial monitor at 115200 baud (`pio device monitor`) to see
+   connection/debug logs.
 
 ## How it works
 

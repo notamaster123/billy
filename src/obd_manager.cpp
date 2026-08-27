@@ -7,7 +7,12 @@ void OBDManager::begin() {
     serialBT.begin(OBD_LOCAL_BT_NAME, true);
 
     if (sizeof(OBD_PAIRING_PIN) > 1) {
+        // setPin() gained a length argument in Arduino-ESP32 core 3.x.
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
         serialBT.setPin(OBD_PAIRING_PIN, sizeof(OBD_PAIRING_PIN) - 1);
+#else
+        serialBT.setPin(OBD_PAIRING_PIN);
+#endif
     }
 }
 
